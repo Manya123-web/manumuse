@@ -564,13 +564,20 @@ async function playIdx(idx) {
   if (!SERVER) { openModal(); return; }
 
   try {
-    const r = await fetch(`${SERVER}/api/stream/${t.id}`, {
-      signal: AbortSignal.timeout(30000) // 30s timeout
-    });
+    const r = await fetch(`${SERVER}/api/stream/${t.id}`);
     let data = await r.json();
 
     if (!r.ok || data.error) {
       console.log("Stream error:", data.error);
+      toast('Cannot play this track', 'warn');
+      return;
+    }
+
+    // 🔥 FIX
+    AUDIO.src = data.url;
+    AUDIO.play();
+    setMediaSession(data);
+    skipCount = 0;
 
       // DO NOT skip immediately — retry once
       toast('Retrying stream...', 'info');
