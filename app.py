@@ -85,43 +85,49 @@ def stream_url(video_id):
 
     url = f'https://www.youtube.com/watch?v={video_id}'
 
-    # Try multiple format strategies so something always plays
     opts = {
         **BASE_OPTS,
         'format': 'bestaudio/best',
         'noplaylist': True,
     }
 
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=False)
+    # ✅ Retry mechanism
+    info = None
+    for _ in range(2):
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+            break
+        except Exception:
+            continue
 
     if not info:
-        return jsonify({'error': 'No info', 'skippable': True}), 500
+        return jsonify({'error': 'No info', 'skippable': False}), 500
 
     formats = info.get('formats', [])
 
-    # Filter only pure audio
+    # ✅ Only PURE audio
     audio_formats = [
         f for f in formats
         if f.get('acodec') != 'none' and f.get('vcodec') == 'none'
     ]
 
-    # Sort → prefer m4a + highest bitrate
+    # ✅ Prefer m4a (best browser support)
     audio_formats.sort(
         key=lambda x: (x.get('ext') != 'm4a', -(x.get('abr') or 0))
     )
 
     chosen = audio_formats[0] if audio_formats else None
 
+    # ✅ Safe fallback (still audio only)
     if not chosen:
-    # fallback to any playable format
-        for f in formats:   
-            if f.get('url'):
+        for f in formats:
+            if f.get('acodec') != 'none' and f.get('url'):
                 chosen = f
                 break
 
     if not chosen:
-        return jsonify({'error': 'No playable stream', 'skippable': True}), 500
+        return jsonify({'error': 'No playable stream', 'skippable': False}), 500
 
     stream = chosen.get('url')
 
@@ -137,7 +143,6 @@ def stream_url(video_id):
 
     cache_set(ck, data)
     return jsonify(data)
-
 
 @app.route('/api/trending')
 def trending():

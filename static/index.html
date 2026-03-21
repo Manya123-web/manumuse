@@ -618,10 +618,28 @@ async function playIdx(idx) {
 
     if (!data.url) { toast('No stream found — skipping', 'warn'); setTimeout(next, 1000); return; }
 
-    // Set real audio src and play
-    AUDIO.src = data.url;
-    AUDIO.load();
-    await AUDIO.play();
+        // Set real audio src and play
+      AUDIO.pause();
+      AUDIO.currentTime = 0;
+
+      // Force reset
+      AUDIO.src = "";
+      AUDIO.load();
+
+      // Set new source with cache-buster
+      AUDIO.src = data.url + "&t=" + Date.now();
+
+      // Load + play
+      AUDIO.load();
+      AUDIO.onerror = null;
+      AUDIO.onended = null;
+      try {
+        await AUDIO.play();
+      } catch (e) {
+          console.log("Play failed, retrying...");
+          AUDIO.src = data.url + "&retry=" + Date.now();
+          await AUDIO.play();
+      }
 
     // Update UI
     document.getElementById('PLNAME').textContent = data.title || t.title;
