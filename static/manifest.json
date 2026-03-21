@@ -4,18 +4,13 @@
   "description": "Stream music from YouTube",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0a0a0f",
-  "theme_color": "#6c5ce7",
+  "background_color": "#080810",
+  "theme_color": "#6c63ff",
   "icons": [
     {
-      "src": "https://via.placeholder.com/192x192?text=MM",
+      "src": "https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg",
       "sizes": "192x192",
-      "type": "image/png"
-    },
-    {
-      "src": "https://via.placeholder.com/512x512?text=MM",
-      "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/jpeg"
     }
   ]
 }

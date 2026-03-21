@@ -9,7 +9,7 @@ import yt_dlp
 app = Flask(__name__, static_folder='static')
 CORS(app)
 
-# Simple cache
+# Cache
 cache = {}
 CACHE_TTL = 300
 
@@ -38,28 +38,35 @@ try:
                         cookies[cookie['name']] = cookie['value']
             else:
                 cookies = data
-        print(f"✅ Loaded cookies")
+        print(f"✅ Loaded cookies from {cookie_file}")
 except Exception as e:
-    print(f"Cookie error: {e}")
+    print(f"⚠️ Cookie error: {e}")
 
-# yt-dlp config - SIMPLIFIED for reliability
+# Fallback tracks (in case YouTube blocks requests)
+FALLBACK_TRACKS = [
+    {'id': 'dQw4w9WgXcQ', 'title': 'Never Gonna Give You Up', 'channel': 'Rick Astley', 'duration': 212},
+    {'id': 'kJQP7kiw5Fk', 'title': 'Despacito', 'channel': 'Luis Fonsi', 'duration': 279},
+    {'id': 'OPf0YbXqDm0', 'title': 'See You Again', 'channel': 'Wiz Khalifa', 'duration': 249},
+    {'id': 'pRpeEdMmmQ0', 'title': 'Let Her Go', 'channel': 'Passenger', 'duration': 252},
+    {'id': 'RgKAFK5djSk', 'title': 'Someone Like You', 'channel': 'Adele', 'duration': 287},
+    {'id': 'JGwWNGJdvx8', 'title': 'Shape of You', 'channel': 'Ed Sheeran', 'duration': 263},
+]
+
+# Add thumbnails to fallback tracks
+for track in FALLBACK_TRACKS:
+    track['thumb'] = f"https://i.ytimg.com/vi/{track['id']}/mqdefault.jpg"
+
 def get_ydl_opts():
     opts = {
         'quiet': True,
         'no_warnings': True,
         'extract_flat': True,
-        'force_generic_extractor': False,
         'nocheckcertificate': True,
         'ignoreerrors': True,
-        'no_color': True,
-        'geo_bypass': True,
         'socket_timeout': 30,
         'retries': 3,
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-us,en;q=0.5',
-            'Sec-Fetch-Mode': 'navigate',
         }
     }
     if cookies:
@@ -81,12 +88,21 @@ def make_track(entry):
 def index():
     return send_from_directory('static', 'index.html')
 
+@app.route('/manifest.json')
+def manifest():
+    return send_from_directory('static', 'manifest.json')
+
+@app.route('/sw.js')
+def sw():
+    return send_from_directory('static', 'sw.js', mimetype='application/javascript')
+
 @app.route('/health')
 def health():
     return jsonify({
         'status': 'ok',
         'cookies_loaded': cookies is not None,
-        'ytdlp_available': True
+        'cookies_count': len(cookies) if cookies else 0,
+        'timestamp': time.time()
     })
 
 @app.route('/api/trending')
@@ -99,44 +115,24 @@ def trending():
         return jsonify(cached)
     
     try:
-        # Try multiple search terms
-        search_terms = [genre, f"{genre} songs", f"top {genre}"]
+        # Try to fetch from YouTube
+        search_query = f"ytsearch10:{genre}"
+        print(f"Searching: {search_query}")
+        
+        with yt_dlp.YoutubeDL(get_ydl_opts()) as ydl:
+            results = ydl.extract_info(search_query, download=False)
+        
         tracks = []
+        if results and results.get('entries'):
+            for entry in results['entries']:
+                track = make_track(entry)
+                if track:
+                    tracks.append(track)
         
-        for term in search_terms[:2]:  # Try first 2 terms
-            if tracks:
-                break
-                
-            search_query = f"ytsearch10:{term}"
-            print(f"Searching: {search_query}")
-            
-            with yt_dlp.YoutubeDL(get_ydl_opts()) as ydl:
-                try:
-                    results = ydl.extract_info(search_query, download=False)
-                    if results and results.get('entries'):
-                        for entry in results['entries']:
-                            track = make_track(entry)
-                            if track:
-                                tracks.append(track)
-                        if tracks:
-                            print(f"Found {len(tracks)} tracks for {term}")
-                            break
-                except Exception as e:
-                    print(f"Search failed for {term}: {e}")
-                    continue
-        
-        # If still no tracks, use fallback
+        # If no tracks found, use fallback
         if not tracks:
-            fallback_tracks = [
-                {'id': 'dQw4w9WgXcQ', 'title': 'Never Gonna Give You Up', 'channel': 'Rick Astley', 'duration': 212},
-                {'id': 'kJQP7kiw5Fk', 'title': 'Despacito', 'channel': 'Luis Fonsi', 'duration': 279},
-                {'id': 'OPf0YbXqDm0', 'title': 'See You Again', 'channel': 'Wiz Khalifa', 'duration': 249},
-                {'id': 'pRpeEdMmmQ0', 'title': 'Let Her Go', 'channel': 'Passenger', 'duration': 252},
-            ]
-            for ft in fallback_tracks:
-                ft['thumb'] = f"https://i.ytimg.com/vi/{ft['id']}/mqdefault.jpg"
-            tracks = fallback_tracks
-            print("Using fallback tracks")
+            print("No tracks from YouTube, using fallback")
+            tracks = FALLBACK_TRACKS[:10]
         
         response_data = {'tracks': tracks, 'genre': genre}
         cache_set(cache_key, response_data)
@@ -144,9 +140,8 @@ def trending():
         
     except Exception as e:
         print(f"Trending error: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'tracks': [], 'error': str(e)}), 500
+        # Return fallback tracks on error
+        return jsonify({'tracks': FALLBACK_TRACKS[:10], 'genre': genre, 'error': str(e)})
 
 @app.route('/api/search')
 def search():
@@ -173,7 +168,11 @@ def search():
                 if track:
                     tracks.append(track)
         
-        print(f"Found {len(tracks)} tracks")
+        # If no tracks found, return filtered fallback
+        if not tracks:
+            # Filter fallback tracks that match the search
+            matching = [t for t in FALLBACK_TRACKS if q.lower() in t['title'].lower()]
+            tracks = matching[:10] if matching else FALLBACK_TRACKS[:5]
         
         response_data = {'tracks': tracks, 'query': q}
         cache_set(cache_key, response_data)
@@ -181,9 +180,7 @@ def search():
         
     except Exception as e:
         print(f"Search error: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'tracks': [], 'error': str(e)}), 500
+        return jsonify({'tracks': FALLBACK_TRACKS[:5], 'query': q, 'error': str(e)})
 
 @app.route('/api/stream/<video_id>')
 def stream_url(video_id):
@@ -210,7 +207,6 @@ def stream_url(video_id):
             # Get audio URL
             audio_url = None
             
-            # Try to get direct URL first
             if info.get('url'):
                 audio_url = info['url']
             elif info.get('formats'):
