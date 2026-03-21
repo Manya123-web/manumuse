@@ -243,7 +243,7 @@ def stream_url(video_id):
 
 @app.route('/api/trending')
 def trending():
-    genre = request.args.get('genre', 'trending music 2025')
+    genre = request.args.get('genre', 'latest songs bollywood 2026')
 
     ck = f'trending:{genre}'
     cached = cache_get(ck)
