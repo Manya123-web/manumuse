@@ -25,26 +25,46 @@ def cache_get(key):
 def cache_set(key, val):
     cache[key] = (val, time.time())
 
-# Load cookies from file
-def load_cookies():
+# Load cookies from file (handles both formats)
+def load_cookies_smart():
     try:
-        cookie_file = os.path.join(os.path.dirname(__file__), 'cookie.json')
-        if os.path.exists(cookie_file):
-            with open(cookie_file, 'r') as f:
-                cookies = json.load(f)
-                print(f"✅ Loaded {len(cookies)} cookies from cookie.json")
-                return cookies
-        else:
-            print("⚠️ cookie.json not found")
+        cookie_file = os.path.join(os.path.dirname(__file__), 'cookie_simple.json')
+        if not os.path.exists(cookie_file):
+            print(f"⚠️ cookie.json not found")
             return None
+        
+        with open(cookie_file, 'r') as f:
+            data = json.load(f)
+        
+        # Check if it's an array (full export format) or object (simple format)
+        if isinstance(data, list):
+            # Format: [{"name": "...", "value": "...", ...}, ...]
+            cookies_dict = {}
+            for cookie in data:
+                name = cookie.get('name')
+                value = cookie.get('value')
+                if name and value:
+                    cookies_dict[name] = value
+            print(f"✅ Converted {len(cookies_dict)} cookies from array format")
+            return cookies_dict
+        elif isinstance(data, dict):
+            # Format: {"cookie_name": "cookie_value", ...}
+            print(f"✅ Loaded {len(data)} cookies from simple format")
+            return data
+        else:
+            print(f"❌ Unknown cookie format")
+            return None
+            
     except Exception as e:
         print(f"❌ Error loading cookies: {e}")
         return None
 
 # Load cookies
-cookies = load_cookies()
+cookies = load_cookies_smart()
+cookies_loaded = cookies is not None
+cookies_count = len(cookies) if cookies else 0
 
-# yt-dlp configuration with mobile support
+# yt-dlp configuration
 BASE = {
     'quiet': True,
     'no_warnings': True,
@@ -52,20 +72,14 @@ BASE = {
     'force_ipv4': True,
     'socket_timeout': 30,
     'extractor_retries': 5,
-    'file_access_retries': 5,
     'retries': 10,
     'http_headers': {
         'User-Agent': 'Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6261.119 Mobile Safari/537.36',
         'Accept-Language': 'en-US,en;q=0.9',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
     },
     'extractor_args': {
         'youtube': {
-            'player_client': ['android', 'web_music', 'ios'],
-            'skip': ['webpage'],
+            'player_client': ['android', 'web_music'],
         }
     },
 }
@@ -73,9 +87,9 @@ BASE = {
 # Add cookies if available
 if cookies:
     BASE['cookies'] = cookies
-    print("✅ YouTube cookies added to requests")
+    print(f"✅ Cookies added to yt-dlp config ({cookies_count} cookies)")
 else:
-    print("⚠️ No cookies found - may encounter sign-in errors")
+    print("⚠️ No cookies - may encounter sign-in errors")
 
 SEARCH_BASE = {**BASE, 'extract_flat': True, 'skip_download': True}
 
@@ -94,24 +108,13 @@ def make_track(e):
 def index():
     return send_from_directory('static', 'index.html')
 
-@app.route('/manifest.json')
-def manifest():
-    return send_from_directory('static', 'manifest.json')
-
-@app.route('/sw.js')
-def sw():
-    r = send_from_directory('static', 'sw.js')
-    r.headers['Service-Worker-Allowed'] = '/'
-    r.headers['Content-Type'] = 'application/javascript'
-    return r
-
 @app.route('/health')
 def health():
-    cookie_status = "loaded" if cookies else "not loaded"
     return jsonify({
-        'status': 'ok', 
-        'timestamp': time.time(),
-        'cookies': cookie_status
+        'status': 'ok',
+        'cookies_loaded': cookies_loaded,
+        'cookies_count': cookies_count,
+        'timestamp': time.time()
     })
 
 @app.route('/api/search')
@@ -185,12 +188,10 @@ def stream_url(video_id):
 
     yt_url = f'https://www.youtube.com/watch?v={video_id}'
 
-    # Try multiple format strategies
     formats_to_try = [
         'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio',
         'bestaudio/best',
         '140/251/250/249',
-        'best[acodec=opus]/best',
     ]
 
     for fmt in formats_to_try:
@@ -207,25 +208,21 @@ def stream_url(video_id):
             if not info:
                 continue
 
-            # Get the best audio URL
             stream_url = None
-            
-            # Try to get direct URL from formats
             formats = info.get('formats', [])
+            
             for f in formats:
                 if f.get('acodec') != 'none' and f.get('vcodec') == 'none':
                     if f.get('url'):
                         stream_url = f['url']
                         break
                         
-            # Fallback to any format with audio
             if not stream_url:
                 for f in formats:
                     if f.get('acodec') != 'none' and f.get('url'):
                         stream_url = f['url']
                         break
                         
-            # Last resort
             if not stream_url:
                 stream_url = info.get('url')
                 
@@ -241,16 +238,6 @@ def stream_url(video_id):
                 cache_set(ck, data)
                 return jsonify(data)
 
-        except yt_dlp.utils.ExtractorError as ex:
-            error_msg = str(ex).lower()
-            print(f"Format {fmt} failed: {error_msg[:100]}")
-            
-            # Check for sign-in errors
-            if 'sign in' in error_msg or 'login' in error_msg or 'premium' in error_msg:
-                if fmt == formats_to_try[-1]:
-                    return jsonify({'error': 'YouTube requires sign-in', 'skippable': True}), 403
-                continue
-            continue
         except Exception as ex:
             print(f"Format {fmt} error: {str(ex)[:100]}")
             continue
@@ -263,19 +250,12 @@ def suggestions():
     if len(q) < 2:
         return jsonify({'suggestions': []})
         
-    ck = f'suggest:{q}'
-    hit = cache_get(ck)
-    if hit:
-        return jsonify(hit)
-        
     try:
         with yt_dlp.YoutubeDL(SEARCH_BASE) as ydl:
             results = ydl.extract_info(f'ytsearch3:{q}', download=False)
         entries = results.get('entries') or []
         suggestions = [e.get('title', '') for e in entries if e][:5]
-        data = {'suggestions': suggestions}
-        cache_set(ck, data)
-        return jsonify(data)
+        return jsonify({'suggestions': suggestions})
     except:
         return jsonify({'suggestions': []})
 
