@@ -94,7 +94,7 @@ def search():
 
     try:
         with yt_dlp.YoutubeDL(SEARCH_OPTS) as ydl:
-            results = ydl.extract_info(f'ytsearch{limit}:{q}', download=False)
+            results = ydl.extract_info(f'ytsearch{limit}:{q} official audio song', download=False)
 
         tracks = [t for t in (parse_track(e) for e in (results.get('entries') or [])) if t]
         data = {'tracks': tracks, 'query': q}
@@ -215,7 +215,7 @@ def stream_url(video_id):
                 return jsonify({
                     'error': 'unavailable',
                     'reason': last_error[:120],
-                    'skippable': True,
+                    'skippable': False,
                 }), 403
             continue  # Try next strategy
 
@@ -225,7 +225,7 @@ def stream_url(video_id):
 
     return jsonify({
         'error': last_error[:200],
-        'skippable': True,
+        'skippable': False,
     }), 500
 
 

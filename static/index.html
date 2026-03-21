@@ -568,16 +568,28 @@ async function playIdx(idx) {
     const data = await r.json();
 
     if (!r.ok || data.error) {
-      skipCount++;
-      const reason = data.reason || data.error || '';
-      if (reason.toLowerCase().includes('sign') || data.error === 'unavailable') {
-        toast('🔒 Track unavailable — skipping', 'warn');
-      } else {
-        toast('⚠️ Stream error — skipping', 'warn');
+      console.log("Stream error:", data.error);
+
+      // DO NOT skip immediately
+      toast('Retrying stream...', 'info');
+
+      // retry once
+      try {
+          const retry = await fetch(`${SERVER}/api/stream/${t.id}`);
+          const retryData = await retry.json();
+
+          if (retry.ok && retryData.url) {
+              data = retryData;
+          } else {
+              throw new Error("Retry failed");
+          }
+      } catch {
+          skipCount++;
+          toast('Track unavailable — skipping', 'warn');
+          setTimeout(() => next(), 800);
+          return;
       }
-      setTimeout(() => next(), 800);
-      return;
-    }
+  }
 
     if (!data.url) {
       skipCount++;
@@ -589,16 +601,21 @@ async function playIdx(idx) {
     // Successfully got stream — reset skip counter
     skipCount = 0;
 
-    // Play the audio
     AUDIO.pause();
-    AUDIO.src = data.url;
+    AUDIO.currentTime = 0;
+
+    // reset completely
+    AUDIO.src = "";
+    AUDIO.load();
+
+    // set new stream
+    AUDIO.src = data.url + "&t=" + Date.now();
     AUDIO.load();
 
     try {
-      await AUDIO.play();
-    } catch(playErr) {
-      // Autoplay blocked — show play button, user can tap manually
-      toast('Tap ▶ to play', 'info');
+        await AUDIO.play();
+    } catch {
+        toast('Tap ▶ to play', 'info');
     }
 
     // Update UI
