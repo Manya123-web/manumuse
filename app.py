@@ -1,6 +1,7 @@
 import os
 import time
 import re
+import traceback
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import yt_dlp
@@ -28,11 +29,24 @@ BASE = {
     'quiet': True,
     'no_warnings': True,
     'nocheckcertificate': True,
+    'force_ipv4': True,
+    'socket_timeout': 30,
     'http_headers': {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         'Accept-Language': 'en-US,en;q=0.9',
     },
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['android', 'web_music', 'web'],  # more clients
+        }
+    },
 }
+
+# Override with environment variables if set
+if os.environ.get('YT_COOKIES_FILE'):
+    BASE['cookiefile'] = os.environ['YT_COOKIES_FILE']
+if os.environ.get('YT_PROXY'):
+    BASE['proxy'] = os.environ['YT_PROXY']
 
 SEARCH_BASE = {**BASE, 'extract_flat': True, 'skip_download': True}
 
@@ -66,8 +80,13 @@ def sw():
 
 @app.route('/health')
 def health():
-    return jsonify({'status': 'ok'})
-
+    # Also test yt-dlp quickly
+    try:
+        with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+            ydl.extract_info('https://www.youtube.com/watch?v=dQw4w9WgXcQ', download=False)
+        return jsonify({'status': 'ok', 'yt-dlp': 'working'})
+    except Exception as e:
+        return jsonify({'status': 'ok', 'yt-dlp': f'error: {str(e)}'}), 500
 
 @app.route('/api/search')
 def search():
@@ -82,19 +101,18 @@ def search():
         return jsonify(hit)
 
     try:
-        # ✅ Correct yt-dlp search syntax
         with yt_dlp.YoutubeDL(SEARCH_BASE) as ydl:
             results = ydl.extract_info(f'ytsearch{limit}:{q}', download=False)
 
-        tracks = [t for t in (make_track(e) for e in (results.get('entries') or [])) if t]
+        entries = results.get('entries') or []
+        tracks = [t for t in (make_track(e) for e in entries) if t]
         data = {'tracks': tracks, 'query': q}
         cache_set(ck, data)
         return jsonify(data)
 
     except Exception as ex:
-        print(f'SEARCH ERROR: {ex}')
+        print('SEARCH ERROR:', traceback.format_exc())
         return jsonify({'error': str(ex), 'tracks': []}), 500
-
 
 @app.route('/api/trending')
 def trending():
@@ -105,19 +123,18 @@ def trending():
         return jsonify(hit)
 
     try:
-        # ✅ Correct yt-dlp search syntax
         with yt_dlp.YoutubeDL(SEARCH_BASE) as ydl:
             results = ydl.extract_info(f'ytsearch25:{genre}', download=False)
 
-        tracks = [t for t in (make_track(e) for e in (results.get('entries') or [])) if t]
+        entries = results.get('entries') or []
+        tracks = [t for t in (make_track(e) for e in entries) if t]
         data = {'tracks': tracks, 'genre': genre}
         cache_set(ck, data)
         return jsonify(data)
 
     except Exception as ex:
-        print(f'TRENDING ERROR: {ex}')
-        return jsonify({'tracks': [], 'error': str(ex)})
-
+        print('TRENDING ERROR:', traceback.format_exc())
+        return jsonify({'tracks': [], 'error': str(ex)}), 500
 
 @app.route('/api/stream/<video_id>')
 def stream_url(video_id):
@@ -132,26 +149,20 @@ def stream_url(video_id):
     yt_url = f'https://www.youtube.com/watch?v={video_id}'
     last_err = 'Unknown error'
 
-    # Try multiple format strategies
+    # Multiple format strategies (audio-only first, then fallback)
     for fmt in [
         'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio',
         '140/251/bestaudio',
+        'bestaudio/best',
         'worstaudio/worst',
     ]:
         try:
             opts = {**BASE,
-    'format': fmt,
-    'skip_download': True,
-    'noplaylist': True,
-    'extractor_args': {
-        'youtube': {
-            'player_client': ['android', 'web']
-        }
-    },
-    'geo_bypass': True,
-    'nocheckcertificate': True,
-    'force_ipv4': True,
-}
+                'format': fmt,
+                'skip_download': True,
+                'noplaylist': True,
+                'extract_flat': False,  # we need full formats
+            }
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(yt_url, download=False)
 
@@ -160,13 +171,13 @@ def stream_url(video_id):
 
             fmts = info.get('formats') or []
 
-            # Find best audio-only format
+            # Find best audio-only format (acodec != none, vcodec == none)
             chosen = None
             for f in reversed(fmts):
                 if f.get('acodec') not in ('none', None) and f.get('vcodec') in ('none', None) and f.get('url'):
                     chosen = f
                     break
-            # Fallback: any format with audio
+            # Fallback: any format with audio (even if it has video)
             if not chosen:
                 for f in reversed(fmts):
                     if f.get('acodec') not in ('none', None) and f.get('url'):
@@ -178,7 +189,12 @@ def stream_url(video_id):
                 continue
 
             ext = (chosen.get('ext') if chosen else None) or info.get('ext') or 'mp4'
-            mime = {'m4a': 'audio/mp4', 'webm': 'audio/webm', 'mp4': 'audio/mp4'}.get(ext, 'audio/mp4')
+            mime = {
+                'm4a': 'audio/mp4',
+                'webm': 'audio/webm',
+                'mp4': 'audio/mp4',
+                'opus': 'audio/opus'
+            }.get(ext, 'audio/mp4')
 
             data = {
                 'url': stream,
@@ -201,10 +217,10 @@ def stream_url(video_id):
             continue
         except Exception as ex:
             last_err = str(ex)
+            print('STREAM ERROR:', traceback.format_exc())
             continue
 
     return jsonify({'error': last_err[:200], 'skippable': True}), 500
-
 
 @app.route('/api/suggestions')
 def suggestions():
@@ -218,13 +234,14 @@ def suggestions():
     try:
         with yt_dlp.YoutubeDL(SEARCH_BASE) as ydl:
             results = ydl.extract_info(f'ytsearch5:{q}', download=False)
-        sugg = [e.get('title', '') for e in (results.get('entries') or []) if e]
+        entries = results.get('entries') or []
+        sugg = [e.get('title', '') for e in entries if e]
         data = {'suggestions': sugg[:5]}
         cache_set(ck, data)
         return jsonify(data)
-    except:
+    except Exception as ex:
+        print('SUGGESTIONS ERROR:', traceback.format_exc())
         return jsonify({'suggestions': []})
-
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
