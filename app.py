@@ -25,44 +25,43 @@ def cache_get(key):
 def cache_set(key, val):
     cache[key] = (val, time.time())
 
-# Load cookies from file (handles both formats)
-def load_cookies_smart():
-    try:
-        cookie_file = os.path.join(os.path.dirname(__file__), 'cookie_simple.json')
-        if not os.path.exists(cookie_file):
-            print(f"⚠️ cookie.json not found")
-            return None
-        
+# Load cookies from file
+cookies = None
+cookies_loaded = False
+cookies_count = 0
+
+try:
+    cookie_file = os.path.join(os.path.dirname(__file__), 'cookie.json')
+    print(f"Looking for cookies at: {cookie_file}")
+    
+    if os.path.exists(cookie_file):
         with open(cookie_file, 'r') as f:
             data = json.load(f)
         
-        # Check if it's an array (full export format) or object (simple format)
+        # Handle both array format and object format
         if isinstance(data, list):
-            # Format: [{"name": "...", "value": "...", ...}, ...]
             cookies_dict = {}
             for cookie in data:
                 name = cookie.get('name')
                 value = cookie.get('value')
                 if name and value:
                     cookies_dict[name] = value
-            print(f"✅ Converted {len(cookies_dict)} cookies from array format")
-            return cookies_dict
+            cookies = cookies_dict
+            cookies_count = len(cookies)
+            cookies_loaded = True
+            print(f"✅ Loaded {cookies_count} cookies from array format")
         elif isinstance(data, dict):
-            # Format: {"cookie_name": "cookie_value", ...}
-            print(f"✅ Loaded {len(data)} cookies from simple format")
-            return data
+            cookies = data
+            cookies_count = len(data)
+            cookies_loaded = True
+            print(f"✅ Loaded {cookies_count} cookies from simple format")
         else:
-            print(f"❌ Unknown cookie format")
-            return None
-            
-    except Exception as e:
-        print(f"❌ Error loading cookies: {e}")
-        return None
-
-# Load cookies
-cookies = load_cookies_smart()
-cookies_loaded = cookies is not None
-cookies_count = len(cookies) if cookies else 0
+            print(f"⚠️ Unknown cookie format")
+    else:
+        print(f"⚠️ cookie.json not found at {cookie_file}")
+        
+except Exception as e:
+    print(f"❌ Error loading cookies: {e}")
 
 # yt-dlp configuration
 BASE = {
@@ -87,9 +86,9 @@ BASE = {
 # Add cookies if available
 if cookies:
     BASE['cookies'] = cookies
-    print(f"✅ Cookies added to yt-dlp config ({cookies_count} cookies)")
+    print("✅ Cookies added to yt-dlp config")
 else:
-    print("⚠️ No cookies - may encounter sign-in errors")
+    print("⚠️ No cookies loaded - may encounter sign-in errors")
 
 SEARCH_BASE = {**BASE, 'extract_flat': True, 'skip_download': True}
 
