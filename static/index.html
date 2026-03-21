@@ -546,10 +546,9 @@ function setMediaSession(t) {
 async function playIdx(idx) {
   if (!queue.length || idx < 0 || idx >= queue.length) return;
 
-  // Safety: stop if we've skipped too many in a row
   if (skipCount >= 5) {
     skipCount = 0;
-    toast('Too many unavailable tracks. Try a different search.', 'warn');
+    toast('Too many unavailable tracks', 'warn');
     return;
   }
 
@@ -559,96 +558,52 @@ async function playIdx(idx) {
   document.getElementById('PLNAME').textContent = '⏳ Loading…';
   document.getElementById('PLCH').textContent = t.channel;
   document.getElementById('PLTHUMB').src = t.thumb || '';
-  updBtn(false);
 
   if (!SERVER) { openModal(); return; }
 
   try {
     const r = await fetch(`${SERVER}/api/stream/${t.id}`);
-    let data = await r.json();
+    const data = await r.json();
 
-    if (!r.ok || data.error) {
-      console.log("Stream error:", data.error);
-      toast('Cannot play this track', 'warn');
-      return;
+    if (!r.ok || !data.url) {
+      throw new Error(data.error || "No stream");
     }
 
-    // 🔥 FIX
+    // ✅ CLEAN PLAY
+    AUDIO.pause();
     AUDIO.src = data.url;
-    AUDIO.play();
+    AUDIO.currentTime = 0;
+
+    try {
+      await AUDIO.play();
+    } catch {
+      toast('Tap ▶ to play', 'info');
+    }
+
+    // ✅ UI update
+    document.getElementById('PLNAME').textContent = data.title || t.title;
+    document.getElementById('PLCH').textContent = data.channel || t.channel;
+    document.getElementById('PLTHUMB').src = data.thumb || t.thumb;
+
     setMediaSession(data);
     skipCount = 0;
 
-      // DO NOT skip immediately — retry once
-      toast('Retrying stream...', 'info');
-
-      try {
-          const retry = await fetch(`${SERVER}/api/stream/${t.id}`);
-          const retryData = await retry.json();
-
-          if (retry.ok && retryData.url) {
-              data = retryData;
-          } else {
-              throw new Error("Retry failed");
-          }
-      } catch {
-          skipCount++;
-          toast('Track unavailable — skipping', 'warn');
-          setTimeout(() => next(), 800);
-          return;
-      }
-    }
-
-    if (!data.url) {
-      skipCount++;
-      toast('No stream URL — skipping', 'warn');
-      setTimeout(() => next(), 800);
-      return;
-    }
-
-    // Successfully got stream — reset skip counter
-    skipCount = 0;
-
-    AUDIO.pause();
-    AUDIO.currentTime = 0;
-
-    // reset completely
-    AUDIO.src = "";
-    AUDIO.load();
-
-    // set new stream
-    AUDIO.src = data.url + "&t=" + Date.now();
-    AUDIO.load();
-
-    try {
-        await AUDIO.play();
-    } catch {
-        toast('Tap ▶ to play', 'info');
-    }
-
-    // Update UI
-    const title = data.title || t.title;
-    const channel = data.channel || t.channel;
-    document.getElementById('PLNAME').textContent = title;
-    document.getElementById('PLCH').textContent = channel;
-    document.getElementById('PLTHUMB').src = data.thumb || t.thumb;
-
-    // Stats
+    // stats
     pday++;
     localStorage.setItem('mm_pday', pday);
     document.getElementById('stP').textContent = pday;
 
-    setMediaSession({ ...t, title, channel });
-    refreshLB(); hlRow(); updBadges();
+    refreshLB();
+    hlRow();
+    updBadges();
 
-  } catch(e) {
+  } catch (e) {
+    console.log("PLAY ERROR:", e);
+
     skipCount++;
-    if (e.name === 'TimeoutError') {
-      toast('Timeout — server too slow, skipping', 'warn');
-    } else {
-      toast('Connection error — skipping', 'warn');
-    }
-    setTimeout(() => next(), 1000);
+    toast('Track unavailable — skipping', 'warn');
+
+    setTimeout(() => next(), 800);
   }
 }
 
