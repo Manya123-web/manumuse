@@ -150,7 +150,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .pcb.main:hover{background:var(--a2);transform:scale(1.07)}.pcb.main svg{width:20px;height:20px}.pcb.on{color:var(--accent)}
 .pl-vol{display:flex;align-items:center;gap:6px;flex-shrink:0}
 .pl-vol svg{width:16px;height:16px;color:var(--t3)}
-.vsl{-webkit-appearance:none;width:68px;height:3px;background:var(--bg5);border-radius:3px;outline:none;cursor:pointer;accent-color:var(--accent)}
+.vsl{-webkit-appearance:none;appearance:none;width:68px;height:3px;background:var(--bg5);border-radius:3px;outline:none;cursor:pointer;accent-color:var(--accent)}
 .vsl::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:var(--text);cursor:pointer}
 
 /* MOBILE NAV */
@@ -412,8 +412,8 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 <!-- MODAL -->
 <div class="modal-bg" id="MODAL" onclick="clsModalOut(event)">
   <div class="modal">
-    <h2>Set Server URL</h2>
-    <p>Enter your deployed backend URL from Render or Railway.</p>
+    <h2>Override Server URL</h2>
+    <p>The server is auto-detected. Only set this if you're using a <b>different</b> backend URL.</p>
     <div class="msteps">
       <div class="mstep"><div class="msn">1</div><div>Deploy backend to <b>Render.com</b> or <b>Railway.app</b></div></div>
       <div class="mstep"><div class="msn">2</div><div>Copy URL e.g. <b>https://manumuse.onrender.com</b></div></div>
@@ -434,7 +434,9 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 // ═══════════════════════════════════════════════════
 //  STATE
 // ═══════════════════════════════════════════════════
-let SERVER = localStorage.getItem('mm_server') || '';
+// Auto-detect server: use same origin when served from Flask (self-hosted deployment)
+// This means users never need to manually set a server URL on Render/Railway
+let SERVER = localStorage.getItem('mm_server') || window.location.origin;
 let queue = [], qi = -1, shuf = false, rep = false;
 let liked = JSON.parse(localStorage.getItem('mm_liked') || '[]');
 let pday = +localStorage.getItem('mm_pday') || 0;
@@ -565,15 +567,14 @@ async function playIdx(idx) {
     const r = await fetch(`${SERVER}/api/stream/${t.id}`, {
       signal: AbortSignal.timeout(30000) // 30s timeout
     });
-    const data = await r.json();
+    let data = await r.json();
 
     if (!r.ok || data.error) {
       console.log("Stream error:", data.error);
 
-      // DO NOT skip immediately
+      // DO NOT skip immediately — retry once
       toast('Retrying stream...', 'info');
 
-      // retry once
       try {
           const retry = await fetch(`${SERVER}/api/stream/${t.id}`);
           const retryData = await retry.json();
@@ -589,7 +590,7 @@ async function playIdx(idx) {
           setTimeout(() => next(), 800);
           return;
       }
-  }
+    }
 
     if (!data.url) {
       skipCount++;
@@ -707,12 +708,12 @@ function renderLiked() {
   document.getElementById('LCNT').textContent = liked.length + ' songs';
   if (!liked.length) { el.innerHTML = emptyH('heart','No liked songs yet','Tap ♡ on any track'); return; }
   el.innerHTML = liked.map((t,i) => `
-    <div class="tr ${queue[qi]?.id===t.id?'pl':''}" onclick="pset(${i})">
+    <div class="tr ${queue[qi]?.id===t.id?'pl':''}" data-idx="${i}" onclick="pset(${i})">
       <div class="t-num">${i+1}</div>
       <img class="t-img" src="${t.thumb}" onerror="this.style.display='none'"/>
       <div class="t-info"><div class="t-name">${x(t.title)}</div><div class="t-ch">${x(t.channel)}</div></div>
       <div class="t-acts">
-        <button class="lbtn lk" onclick="event.stopPropagation();toggleLike(${J(t)})">
+        <button class="lbtn lk" data-liked-idx="${i}" onclick="event.stopPropagation();toggleLikedByIdx(${i})">
           <svg viewBox="0 0 24 24" fill="var(--pink)" stroke="var(--pink)" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
         </button>
       </div>
@@ -768,10 +769,10 @@ function renderAll(items, cid, lid) {
       ${t.duration ? `<div class="t-dur">${fmt(t.duration)}</div>` : ''}
       <div class="t-acts">
         <div class="eq"><div class="eb"></div><div class="eb"></div><div class="eb"></div></div>
-        <button class="lbtn ${il?'lk':''}" onclick="event.stopPropagation();toggleLike(${J(t)})">
+        <button class="lbtn ${il?'lk':''}" data-item-idx="${i+6}" onclick="event.stopPropagation();toggleLikeByIdx(${i+6})">
           <svg viewBox="0 0 24 24" fill="${il?'var(--pink)':'none'}" stroke="${il?'var(--pink)':'currentColor'}" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
         </button>
-        <button class="qbtn" onclick="event.stopPropagation();addQ(${J(t)})">+ Queue</button>
+        <button class="qbtn" data-item-idx="${i+6}" onclick="event.stopPropagation();addQByIdx(${i+6})">+ Queue</button>
       </div>
     </div>`;
   }).join('');
@@ -856,7 +857,7 @@ SI.addEventListener('input', function() {
     const d = await apiFetch(`/api/suggestions?q=${encodeURIComponent(v)}`);
     if (d?.suggestions?.length) {
       SUGG.innerHTML = d.suggestions.map(s =>
-        `<div class="sugg-item" onclick="pickSugg('${x(s)}')">
+        `<div class="sugg-item" data-sugg="${x(s)}" onclick="pickSuggEl(this)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>${x(s)}
         </div>`).join('');
       SUGG.classList.add('show');
@@ -871,6 +872,7 @@ SI.addEventListener('keydown', function(e) {
 });
 document.addEventListener('click', e => { if (!e.target.closest('.search-bar')) SUGG.classList.remove('show'); });
 function pickSugg(s) { SI.value=s; SUGG.classList.remove('show'); doSearch(s); }
+function pickSuggEl(el) { const s = el.dataset.sugg; SI.value=s; SUGG.classList.remove('show'); doSearch(s); }
 function clrSearch() { SI.value=''; document.getElementById('SX').style.display='none'; SUGG.classList.remove('show'); if(curP==='search') go('home'); }
 
 async function doSearch(q) {
@@ -929,8 +931,11 @@ function toast(msg, type='info') {
   clearTimeout(ttmr);
   ttmr = setTimeout(() => el.classList.remove('show'), 2800);
 }
-function x(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function J(t) { return JSON.stringify(t).replace(/"/g,"'"); }
+function x(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+// Index-based helpers — safer than embedding raw JSON in onclick attrs
+function toggleLikeByIdx(idx) { const t = lastItems[idx]; if (t) toggleLike(t); }
+function addQByIdx(idx) { const t = lastItems[idx]; if (t) addQ(t); }
+function toggleLikedByIdx(idx) { const t = liked[idx]; if (t) toggleLike(t); }
 
 // ═══════════════════════════════════════════════════
 //  SERVICE WORKER

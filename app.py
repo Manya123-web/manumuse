@@ -64,7 +64,7 @@ def index():
     return send_from_directory('static', 'index.html')
 
 # Explicitly serve PWA files to fix 404 errors
-@app.route('manifest.json')
+@app.route('/manifest.json')
 def manifest():
     return send_from_directory('static', 'manifest.json')
 
