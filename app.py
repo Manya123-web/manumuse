@@ -38,7 +38,9 @@ try:
                         cookies[cookie['name']] = cookie['value']
             else:
                 cookies = data
-        print(f"✅ Loaded cookies from {cookie_file}")
+        print(f"✅ Loaded {len(cookies)} cookies from {cookie_file}")
+    else:
+        print(f"⚠️ cookie.json not found")
 except Exception as e:
     print(f"⚠️ Cookie error: {e}")
 
@@ -84,6 +86,7 @@ def make_track(entry):
         'thumb': f"https://i.ytimg.com/vi/{entry['id']}/mqdefault.jpg",
     }
 
+# Serve main pages
 @app.route('/')
 def index():
     return send_from_directory('static', 'index.html')
@@ -96,12 +99,18 @@ def manifest():
 def sw():
     return send_from_directory('static', 'sw.js', mimetype='application/javascript')
 
+# Serve any static file from static folder
+@app.route('/static/<path:filename>')
+def static_files(filename):
+    return send_from_directory('static', filename)
+
 @app.route('/health')
 def health():
     return jsonify({
         'status': 'ok',
         'cookies_loaded': cookies is not None,
         'cookies_count': len(cookies) if cookies else 0,
+        'fallback_available': True,
         'timestamp': time.time()
     })
 
