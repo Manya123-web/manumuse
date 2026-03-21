@@ -605,7 +605,18 @@ async function playIdx(idx) {
     const r = await fetch(`${SERVER}/api/stream/${t.id}`);
     const data = await r.json();
 
-    if (data.error) { toast('Could not load: ' + data.error.slice(0,40), 'warn'); setTimeout(next, 2000); return; }
+    if (data.error) {
+      if (data.error === 'sign_in_required') {
+        toast('🔒 Sign-in required — skipping', 'warn');
+      } else {
+        toast('⚠️ Could not load — skipping', 'warn');
+      }
+      // Skip faster — 1 second delay then auto next
+      setTimeout(next, 1000);
+      return;
+    }
+
+    if (!data.url) { toast('No stream found — skipping', 'warn'); setTimeout(next, 1000); return; }
 
     // Set real audio src and play
     AUDIO.src = data.url;
