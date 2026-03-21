@@ -19,6 +19,7 @@
             color: #fff;
             overflow: hidden;
             height: 100vh;
+            touch-action: pan-y;
         }
 
         .app {
@@ -54,6 +55,7 @@
             font-size: 16px;
             outline: none;
             transition: all 0.2s;
+            -webkit-appearance: none;
         }
 
         .search-input:focus {
@@ -73,9 +75,10 @@
             background: none;
             border: none;
             color: rgba(255,255,255,0.5);
-            font-size: 18px;
+            font-size: 20px;
             cursor: pointer;
             display: none;
+            padding: 4px;
         }
 
         /* Suggestions */
@@ -90,6 +93,8 @@
             z-index: 1000;
             display: none;
             box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            max-height: 300px;
+            overflow-y: auto;
         }
 
         .suggestions.show {
@@ -101,9 +106,10 @@
             cursor: pointer;
             transition: background 0.2s;
             border-bottom: 1px solid rgba(255,255,255,0.05);
+            font-size: 14px;
         }
 
-        .suggestion-item:hover {
+        .suggestion-item:active {
             background: rgba(108, 92, 231, 0.2);
         }
 
@@ -112,6 +118,7 @@
             flex: 1;
             overflow-y: auto;
             padding: 16px;
+            -webkit-overflow-scrolling: touch;
         }
 
         /* Tabs */
@@ -121,6 +128,7 @@
             overflow-x: auto;
             margin-bottom: 16px;
             padding-bottom: 8px;
+            scrollbar-width: none;
         }
 
         .tabs::-webkit-scrollbar {
@@ -135,6 +143,11 @@
             white-space: nowrap;
             cursor: pointer;
             transition: all 0.2s;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .tab:active {
+            transform: scale(0.96);
         }
 
         .tab.active {
@@ -156,6 +169,7 @@
             overflow: hidden;
             cursor: pointer;
             transition: transform 0.2s;
+            -webkit-tap-highlight-color: transparent;
         }
 
         .card:active {
@@ -201,6 +215,7 @@
             border-bottom: 1px solid rgba(255,255,255,0.05);
             cursor: pointer;
             transition: background 0.2s;
+            -webkit-tap-highlight-color: transparent;
         }
 
         .track-item:active {
@@ -221,17 +236,24 @@
 
         .track-info {
             flex: 1;
+            min-width: 0;
         }
 
         .track-title {
             font-size: 14px;
             font-weight: 500;
             margin-bottom: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .track-channel {
             font-size: 12px;
             color: rgba(255,255,255,0.6);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .track-duration {
@@ -242,7 +264,7 @@
 
         .track-actions {
             display: flex;
-            gap: 8px;
+            gap: 12px;
             margin-left: 8px;
         }
 
@@ -251,13 +273,14 @@
             border: none;
             color: rgba(255,255,255,0.6);
             cursor: pointer;
-            padding: 6px;
+            padding: 8px;
             font-size: 18px;
-            transition: color 0.2s;
+            transition: transform 0.1s;
+            -webkit-tap-highlight-color: transparent;
         }
 
         .action-btn:active {
-            color: #6c5ce7;
+            transform: scale(0.9);
         }
 
         .action-btn.liked {
@@ -270,11 +293,17 @@
             bottom: 0;
             left: 0;
             right: 0;
-            background: rgba(10, 10, 15, 0.95);
+            background: rgba(10, 10, 15, 0.98);
             backdrop-filter: blur(10px);
             border-top: 1px solid rgba(255,255,255,0.1);
             padding: 12px 16px;
             z-index: 100;
+            transform: translateY(100%);
+            transition: transform 0.3s ease;
+        }
+
+        .player.show {
+            transform: translateY(0);
         }
 
         .player-progress {
@@ -347,7 +376,8 @@
             cursor: pointer;
             padding: 8px;
             font-size: 20px;
-            transition: transform 0.2s;
+            transition: transform 0.1s;
+            -webkit-tap-highlight-color: transparent;
         }
 
         .control-btn:active {
@@ -364,17 +394,11 @@
             justify-content: center;
         }
 
-        /* Loading */
-        .loading {
+        /* Loading & Empty States */
+        .loading, .empty {
             text-align: center;
             padding: 40px;
             color: rgba(255,255,255,0.6);
-        }
-
-        .empty {
-            text-align: center;
-            padding: 40px;
-            color: rgba(255,255,255,0.5);
         }
 
         /* Toast */
@@ -392,16 +416,33 @@
             opacity: 0;
             transition: opacity 0.3s;
             pointer-events: none;
+            white-space: nowrap;
+            max-width: 90%;
+            white-space: normal;
+            text-align: center;
         }
 
         .toast.show {
             opacity: 1;
         }
 
-        /* Mobile bottom padding */
+        /* Mobile adjustments */
         @media (max-width: 768px) {
             .content {
-                padding-bottom: 100px;
+                padding-bottom: 20px;
+            }
+            
+            .grid {
+                grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+                gap: 10px;
+            }
+            
+            .track-actions {
+                gap: 8px;
+            }
+            
+            .action-btn {
+                padding: 6px;
             }
         }
     </style>
@@ -426,7 +467,7 @@
             <div id="results"></div>
         </div>
 
-        <div class="player" id="player" style="display: none;">
+        <div class="player" id="player">
             <div class="player-progress" id="progressBar">
                 <div class="player-progress-fill" id="progressFill"></div>
             </div>
@@ -438,7 +479,7 @@
                     <div class="player-time" id="playerTime">0:00 / 0:00</div>
                 </div>
                 <div class="player-controls">
-                    <button class="control-btn" id="likeBtn">♥</button>
+                    <button class="control-btn" id="likeBtn">♡</button>
                     <button class="control-btn" id="prevBtn">⏮</button>
                     <button class="control-btn play" id="playBtn">▶</button>
                     <button class="control-btn" id="nextBtn">⏭</button>
@@ -449,7 +490,7 @@
 
     <div class="toast" id="toast"></div>
 
-    <audio id="audio" preload="none"></audio>
+    <audio id="audio" preload="metadata"></audio>
 
     <script>
         // Configuration
@@ -463,15 +504,9 @@
         let likedSongs = [];
         let isLoading = false;
         let retryCount = 0;
-        let audio = document.getElementById('audio');
-        
-        // Load liked songs from localStorage
-        try {
-            const saved = localStorage.getItem('likedSongs');
-            if (saved) likedSongs = JSON.parse(saved);
-        } catch(e) {}
         
         // DOM Elements
+        const audio = document.getElementById('audio');
         const content = document.getElementById('content');
         const resultsDiv = document.getElementById('results');
         const searchInput = document.getElementById('searchInput');
@@ -489,6 +524,12 @@
         const progressBar = document.getElementById('progressBar');
         const progressFill = document.getElementById('progressFill');
         
+        // Load liked songs
+        try {
+            const saved = localStorage.getItem('manumuse_liked');
+            if (saved) likedSongs = JSON.parse(saved);
+        } catch(e) {}
+        
         // Helper Functions
         function showToast(message, duration = 2000) {
             const toast = document.getElementById('toast');
@@ -498,14 +539,14 @@
         }
         
         function formatTime(seconds) {
-            if (isNaN(seconds)) return '0:00';
+            if (isNaN(seconds) || !seconds) return '0:00';
             const mins = Math.floor(seconds / 60);
             const secs = Math.floor(seconds % 60);
             return `${mins}:${secs.toString().padStart(2, '0')}`;
         }
         
         function saveLikedSongs() {
-            localStorage.setItem('likedSongs', JSON.stringify(likedSongs));
+            localStorage.setItem('manumuse_liked', JSON.stringify(likedSongs));
             updateLikedBadges();
         }
         
@@ -513,105 +554,76 @@
             return likedSongs.some(song => song.id === trackId);
         }
         
-        function addToLiked(track) {
-            if (!isLiked(track.id)) {
-                likedSongs.push(track);
-                saveLikedSongs();
-                showToast('Added to liked!', 1500);
-                updateLikeButton();
-                if (currentTab === 'liked') loadLikedSongs();
-            }
-        }
-        
-        function removeFromLiked(trackId) {
-            likedSongs = likedSongs.filter(song => song.id !== trackId);
-            saveLikedSongs();
-            showToast('Removed from liked', 1500);
-            updateLikeButton();
-            if (currentTab === 'liked') loadLikedSongs();
-        }
-        
         function toggleLike(track) {
             if (isLiked(track.id)) {
-                removeFromLiked(track.id);
+                likedSongs = likedSongs.filter(s => s.id !== track.id);
+                showToast('Removed from liked', 1000);
             } else {
-                addToLiked(track);
+                likedSongs.push(track);
+                showToast('Added to liked! ♥', 1000);
             }
+            saveLikedSongs();
+            updateLikeButton();
+            if (currentTab === 'liked') loadLikedSongs();
         }
         
         function updateLikeButton() {
             if (currentIndex >= 0 && currentQueue[currentIndex]) {
                 const track = currentQueue[currentIndex];
                 likeBtn.textContent = isLiked(track.id) ? '❤️' : '♡';
-                likeBtn.style.color = isLiked(track.id) ? '#ff4757' : '#fff';
             }
         }
         
         function updateLikedBadges() {
-            // Update any liked badges in UI if needed
+            // Update any UI elements showing liked count
         }
         
-        // Audio Event Handlers
-        audio.addEventListener('timeupdate', () => {
-            if (audio.duration) {
-                const percent = (audio.currentTime / audio.duration) * 100;
-                progressFill.style.width = `${percent}%`;
-                playerTime.textContent = `${formatTime(audio.currentTime)} / ${formatTime(audio.duration)}`;
-            }
-        });
-        
-        audio.addEventListener('ended', () => {
-            playNext();
-        });
-        
-        audio.addEventListener('error', (e) => {
-            console.error('Audio error:', e);
-            if (retryCount < 2) {
-                retryCount++;
-                showToast(`Retrying... (${retryCount}/2)`, 1000);
-                setTimeout(() => playCurrentTrack(), 1000);
-            } else {
-                retryCount = 0;
-                showToast('Failed to play, skipping...', 1500);
-                setTimeout(() => playNext(), 1500);
-            }
-        });
-        
-        audio.addEventListener('canplay', () => {
-            retryCount = 0;
-        });
-        
-        function playCurrentTrack() {
-            if (currentIndex < 0 || !currentQueue[currentIndex]) return;
+        // Audio Control
+        function playTrack(index) {
+            if (index < 0 || index >= currentQueue.length) return;
             
+            currentIndex = index;
             const track = currentQueue[currentIndex];
+            
+            // Update UI
             playerTitle.textContent = track.title;
             playerChannel.textContent = track.channel;
             playerThumb.src = track.thumb;
             updateLikeButton();
-            player.style.display = 'block';
+            player.classList.add('show');
             
             // Fetch stream URL
+            showToast('Loading...', 1000);
+            
             fetch(`${API_BASE}/api/stream/${track.id}`)
                 .then(res => res.json())
                 .then(data => {
                     if (data.url) {
                         audio.src = data.url;
-                        audio.play().catch(e => {
+                        audio.play().then(() => {
+                            playBtn.textContent = '⏸';
+                            retryCount = 0;
+                        }).catch(e => {
                             console.error('Play failed:', e);
-                            showToast('Tap play to start', 2000);
+                            showToast('Tap play to start', 1500);
+                            playBtn.textContent = '▶';
                         });
-                        playBtn.textContent = '⏸';
                     } else {
                         throw new Error(data.error || 'No stream URL');
                     }
                 })
                 .catch(err => {
                     console.error('Stream error:', err);
-                    showToast('Cannot play this track', 1500);
+                    const errorMsg = err.message.toLowerCase();
+                    if (errorMsg.includes('sign in') || errorMsg.includes('login')) {
+                        showToast('⚠️ YouTube requires sign-in. Try a different song.', 3000);
+                    } else {
+                        showToast('Cannot play this track', 2000);
+                    }
+                    
                     if (retryCount < 2) {
                         retryCount++;
-                        setTimeout(() => playCurrentTrack(), 1000);
+                        setTimeout(() => playTrack(index), 1500);
                     } else {
                         retryCount = 0;
                         playNext();
@@ -619,19 +631,12 @@
                 });
         }
         
-        function playTrack(index) {
-            if (index >= 0 && index < currentQueue.length) {
-                currentIndex = index;
-                playCurrentTrack();
-            }
-        }
-        
         function playNext() {
             if (currentIndex < currentQueue.length - 1) {
                 playTrack(currentIndex + 1);
             } else {
                 showToast('End of queue', 1000);
-                player.style.display = 'none';
+                player.classList.remove('show');
                 currentIndex = -1;
             }
         }
@@ -644,15 +649,52 @@
         
         function togglePlay() {
             if (audio.paused) {
-                audio.play();
-                playBtn.textContent = '⏸';
+                audio.play().then(() => {
+                    playBtn.textContent = '⏸';
+                }).catch(e => {
+                    showToast('Unable to play', 1000);
+                });
             } else {
                 audio.pause();
                 playBtn.textContent = '▶';
             }
         }
         
-        // Seek functionality
+        // Audio Events
+        audio.addEventListener('timeupdate', () => {
+            if (audio.duration && !isNaN(audio.duration)) {
+                const percent = (audio.currentTime / audio.duration) * 100;
+                progressFill.style.width = `${percent}%`;
+                playerTime.textContent = `${formatTime(audio.currentTime)} / ${formatTime(audio.duration)}`;
+            }
+        });
+        
+        audio.addEventListener('ended', () => {
+            playNext();
+        });
+        
+        audio.addEventListener('play', () => {
+            playBtn.textContent = '⏸';
+        });
+        
+        audio.addEventListener('pause', () => {
+            playBtn.textContent = '▶';
+        });
+        
+        audio.addEventListener('error', (e) => {
+            console.error('Audio error:', e);
+            if (retryCount < 2) {
+                retryCount++;
+                showToast(`Retrying... (${retryCount}/2)`, 1000);
+                setTimeout(() => playTrack(currentIndex), 1000);
+            } else {
+                retryCount = 0;
+                showToast('Skipping track', 1000);
+                setTimeout(() => playNext(), 1000);
+            }
+        });
+        
+        // Seek
         progressBar.addEventListener('click', (e) => {
             if (!audio.duration) return;
             const rect = progressBar.getBoundingClientRect();
@@ -671,43 +713,53 @@
         };
         
         // Render Functions
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/[&<>]/g, function(m) {
+                if (m === '&') return '&amp;';
+                if (m === '<') return '&lt;';
+                if (m === '>') return '&gt;';
+                return m;
+            });
+        }
+        
         function renderTracks(tracks, container) {
             if (!tracks || tracks.length === 0) {
                 container.innerHTML = '<div class="empty">No tracks found</div>';
                 return;
             }
             
+            const gridItems = tracks.slice(0, 6).map((track, idx) => `
+                <div class="card" data-index="${idx}">
+                    <img class="card-image" src="${track.thumb}" alt="${escapeHtml(track.title)}" loading="lazy">
+                    <div class="card-info">
+                        <div class="card-title">${escapeHtml(track.title)}</div>
+                        <div class="card-subtitle">${escapeHtml(track.channel)}</div>
+                    </div>
+                </div>
+            `).join('');
+            
+            const listItems = tracks.slice(6).map((track, idx) => `
+                <div class="track-item ${currentQueue[currentIndex]?.id === track.id ? 'playing' : ''}" data-index="${idx + 6}">
+                    <img class="track-image" src="${track.thumb}" alt="${escapeHtml(track.title)}" loading="lazy">
+                    <div class="track-info">
+                        <div class="track-title">${escapeHtml(track.title)}</div>
+                        <div class="track-channel">${escapeHtml(track.channel)}</div>
+                    </div>
+                    <div class="track-duration">${formatTime(track.duration)}</div>
+                    <div class="track-actions">
+                        <button class="action-btn like-btn" data-id="${track.id}">${isLiked(track.id) ? '❤️' : '♡'}</button>
+                        <button class="action-btn queue-btn" data-idx="${idx + 6}">+Q</button>
+                    </div>
+                </div>
+            `).join('');
+            
             container.innerHTML = `
-                <div class="grid">
-                    ${tracks.slice(0, 6).map((track, idx) => `
-                        <div class="card" data-index="${idx}">
-                            <img class="card-image" src="${track.thumb}" alt="${track.title}" loading="lazy">
-                            <div class="card-info">
-                                <div class="card-title">${escapeHtml(track.title)}</div>
-                                <div class="card-subtitle">${escapeHtml(track.channel)}</div>
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-                <div class="list">
-                    ${tracks.slice(6).map((track, idx) => `
-                        <div class="track-item ${currentQueue[currentIndex]?.id === track.id ? 'playing' : ''}" data-index="${idx + 6}">
-                            <img class="track-image" src="${track.thumb}" alt="${track.title}" loading="lazy">
-                            <div class="track-info">
-                                <div class="track-title">${escapeHtml(track.title)}</div>
-                                <div class="track-channel">${escapeHtml(track.channel)}</div>
-                            </div>
-                            <div class="track-duration">${formatTime(track.duration)}</div>
-                            <div class="track-actions">
-                                <button class="action-btn like-btn" data-id="${track.id}" data-liked="${isLiked(track.id)}">${isLiked(track.id) ? '❤️' : '♡'}</button>
-                                <button class="action-btn queue-btn" data-idx="${idx + 6}">+Q</button>
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
+                <div class="grid">${gridItems}</div>
+                <div class="list">${listItems}</div>
             `;
             
-            // Attach event listeners
+            // Card click
             container.querySelectorAll('.card').forEach(card => {
                 card.addEventListener('click', () => {
                     const idx = parseInt(card.dataset.index);
@@ -716,6 +768,7 @@
                 });
             });
             
+            // Track item click
             container.querySelectorAll('.track-item').forEach(item => {
                 item.addEventListener('click', (e) => {
                     if (!e.target.classList.contains('action-btn')) {
@@ -726,18 +779,20 @@
                 });
             });
             
+            // Like buttons
             container.querySelectorAll('.like-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     const trackId = btn.dataset.id;
                     const track = tracks.find(t => t.id === trackId);
-                    if (track) toggleLike(track);
-                    const isNowLiked = isLiked(trackId);
-                    btn.textContent = isNowLiked ? '❤️' : '♡';
-                    btn.dataset.liked = isNowLiked;
+                    if (track) {
+                        toggleLike(track);
+                        btn.textContent = isLiked(trackId) ? '❤️' : '♡';
+                    }
                 });
             });
             
+            // Queue buttons
             container.querySelectorAll('.queue-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
@@ -751,16 +806,6 @@
             });
         }
         
-        function escapeHtml(str) {
-            if (!str) return '';
-            return str.replace(/[&<>]/g, function(m) {
-                if (m === '&') return '&amp;';
-                if (m === '<') return '&lt;';
-                if (m === '>') return '&gt;';
-                return m;
-            });
-        }
-        
         // API Calls
         async function loadHome() {
             resultsDiv.innerHTML = '<div class="loading">Loading...</div>';
@@ -770,7 +815,7 @@
                 currentTracks = data.tracks || [];
                 renderTracks(currentTracks, resultsDiv);
             } catch (err) {
-                console.error('Error loading home:', err);
+                console.error('Error:', err);
                 resultsDiv.innerHTML = '<div class="empty">Failed to load. Check connection.</div>';
             }
         }
@@ -783,7 +828,7 @@
                 currentTracks = data.tracks || [];
                 renderTracks(currentTracks, resultsDiv);
             } catch (err) {
-                console.error('Error loading trending:', err);
+                console.error('Error:', err);
                 resultsDiv.innerHTML = '<div class="empty">Failed to load trending</div>';
             }
         }
@@ -887,9 +932,6 @@
                 suggestionsDiv.classList.remove('show');
                 searchSongs(searchInput.value);
                 switchTab('home');
-                document.querySelector('.tab[data-tab="home"]').classList.add('active');
-                document.querySelector('.tab[data-tab="trending"]').classList.remove('active');
-                document.querySelector('.tab[data-tab="liked"]').classList.remove('active');
             }
         });
         
@@ -907,25 +949,19 @@
             navigator.serviceWorker.register('/sw.js').catch(console.error);
         }
         
-        // Handle page visibility for audio
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                // Page hidden, audio continues playing
-            } else {
-                // Page visible again
-                if (audio.paused && currentIndex >= 0) {
-                    // Don't auto-play, user needs to tap play
-                }
-            }
-        });
-        
-        // Handle audio focus
+        // Media Session API for lockscreen controls
         if ('mediaSession' in navigator) {
             navigator.mediaSession.setActionHandler('play', () => audio.play());
             navigator.mediaSession.setActionHandler('pause', () => audio.pause());
             navigator.mediaSession.setActionHandler('previoustrack', playPrevious);
             navigator.mediaSession.setActionHandler('nexttrack', playNext);
         }
+        
+        // Prevent pull-to-refresh on iOS
+        document.body.addEventListener('touchmove', (e) => {
+            if (e.target.closest('.content')) return;
+            if (e.target.closest('.player')) return;
+        }, { passive: false });
     </script>
 </body>
 </html>
