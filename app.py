@@ -86,8 +86,7 @@ def stream_url(video_id):
     url = f'https://www.youtube.com/watch?v={video_id}'
 
     # Try multiple format strategies so something always plays
-    for fmt in ['bestaudio[ext=m4a]', 'bestaudio[ext=webm]', 'bestaudio', 'best[height<=144]', 'worst']:
-        opts = {
+    opts = {
         **BASE_OPTS,
         'format': 'bestaudio/best',
         'noplaylist': True,
@@ -99,27 +98,36 @@ def stream_url(video_id):
     if not info:
         return jsonify({'error': 'No info', 'skippable': True}), 500
 
-    # Get best audio format
     formats = info.get('formats', [])
 
+    # Filter only pure audio
     audio_formats = [
         f for f in formats
         if f.get('acodec') != 'none' and f.get('vcodec') == 'none'
     ]
 
-    # Prefer m4a (most compatible)
-    audio_formats.sort(key=lambda x: (x.get('ext') != 'm4a', -x.get('abr', 0)))
+    # Sort → prefer m4a + highest bitrate
+    audio_formats.sort(
+        key=lambda x: (x.get('ext') != 'm4a', -(x.get('abr') or 0))
+    )
 
     chosen = audio_formats[0] if audio_formats else None
 
     if not chosen:
-        return jsonify({'error': 'No audio format', 'skippable': True}), 500
+    # fallback to any playable format
+        for f in formats:   
+            if f.get('url'):
+                chosen = f
+                break
+
+    if not chosen:
+        return jsonify({'error': 'No playable stream', 'skippable': True}), 500
 
     stream = chosen.get('url')
 
     data = {
         'url': stream,
-        'mime': 'audio/mp4',  # force compatibility
+        'mime': 'audio/mp4',
         'duration': info.get('duration') or 0,
         'title': info.get('title') or 'Unknown',
         'channel': info.get('uploader') or 'Unknown',
