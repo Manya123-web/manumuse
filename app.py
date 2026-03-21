@@ -174,7 +174,7 @@ def suggestions():
         return jsonify(cached)
     try:
         with yt_dlp.YoutubeDL(SEARCH_OPTS) as ydl:
-            results = ydl.extract_info(f'ytsearch5:{q}', download=False)
+            results = ydl.extract_info(f'ytsearch{limit}:{q} song official audio hd', download=False)
         sugg = [e.get('title', '') for e in (results.get('entries') or []) if e]
         data = {'suggestions': sugg[:5]}
         cache_set(ck, data)
