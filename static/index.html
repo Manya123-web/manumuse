@@ -599,10 +599,10 @@
     } catch (e) {
       console.log("PLAY ERROR:", e);
 
-      skipCount++;
-      toast('Track unavailable — skipping', 'warn');
+      toast('This track is unavailable', 'warn');
+      return;
 
-      setTimeout(() => next(), 800);
+      // setTimeout(() => next(), 800);
     }
   }
 

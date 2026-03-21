@@ -139,7 +139,19 @@ def stream_url(video_id):
         'worstaudio/worst',
     ]:
         try:
-            opts = {**BASE, 'format': fmt, 'skip_download': True, 'noplaylist': True}
+            opts = {**BASE,
+    'format': fmt,
+    'skip_download': True,
+    'noplaylist': True,
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['android', 'web']
+        }
+    },
+    'geo_bypass': True,
+    'nocheckcertificate': True,
+    'force_ipv4': True,
+}
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(yt_url, download=False)
 
