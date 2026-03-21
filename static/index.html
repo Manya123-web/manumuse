@@ -789,9 +789,9 @@ checkServer();
 fetchHome('popular music');
 
 // Service Worker
-// if ('serviceWorker' in navigator) {
-//   navigator.serviceWorker.register('/sw.js').catch(() => {});
-// }
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
 
 // Media Session
 if ('mediaSession' in navigator) {
