@@ -87,57 +87,48 @@ def stream_url(video_id):
 
     # Try multiple format strategies so something always plays
     for fmt in ['bestaudio[ext=m4a]', 'bestaudio[ext=webm]', 'bestaudio', 'best[height<=144]', 'worst']:
-        try:
-            opts = {**BASE_OPTS, 'format': fmt, 'skip_download': True}
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+        opts = {
+        **BASE_OPTS,
+        'format': 'bestaudio/best',
+        'noplaylist': True,
+    }
 
-            if not info:
-                continue
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
 
-            formats = info.get('formats') or []
+    if not info:
+        return jsonify({'error': 'No info', 'skippable': True}), 500
 
-            # Prefer audio-only format
-            chosen = None
-            for f in reversed(formats):
-                if f.get('acodec') not in (None, 'none') and f.get('vcodec') in (None, 'none') and f.get('url'):
-                    chosen = f
-                    break
+    # Get best audio format
+    formats = info.get('formats', [])
 
-            # Fall back to any format with URL
-            if not chosen:
-                for f in reversed(formats):
-                    if f.get('url'):
-                        chosen = f
-                        break
+    audio_formats = [
+        f for f in formats
+        if f.get('acodec') != 'none' and f.get('vcodec') == 'none'
+    ]
 
-            stream = (chosen.get('url') if chosen else None) or info.get('url')
-            if not stream:
-                continue
+    # Prefer m4a (most compatible)
+    audio_formats.sort(key=lambda x: (x.get('ext') != 'm4a', -x.get('abr', 0)))
 
-            ext = (chosen.get('ext') if chosen else None) or info.get('ext') or 'mp4'
-            data = {
-                'url': stream,
-                'mime': f'audio/{ext}',
-                'duration': info.get('duration') or 0,
-                'title': info.get('title') or 'Unknown',
-                'channel': info.get('uploader') or info.get('channel') or 'Unknown',
-                'thumb': f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg",
-                'video_id': video_id,
-            }
-            cache_set(ck, data)
-            return jsonify(data)
+    chosen = audio_formats[0] if audio_formats else None
 
-        except yt_dlp.utils.ExtractorError as ex:
-            err = str(ex)
-            # Sign-in / private video — tell frontend to skip, don't retry
-            if any(k in err.lower() for k in ['sign in', 'login', 'private', 'age']):
-                return jsonify({'error': 'sign_in_required', 'skippable': True}), 403
-            continue
-        except Exception:
-            continue
+    if not chosen:
+        return jsonify({'error': 'No audio format', 'skippable': True}), 500
 
-    return jsonify({'error': 'Could not extract stream', 'skippable': True}), 500
+    stream = chosen.get('url')
+
+    data = {
+        'url': stream,
+        'mime': 'audio/mp4',  # force compatibility
+        'duration': info.get('duration') or 0,
+        'title': info.get('title') or 'Unknown',
+        'channel': info.get('uploader') or 'Unknown',
+        'thumb': f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg",
+        'video_id': video_id,
+    }
+
+    cache_set(ck, data)
+    return jsonify(data)
 
 
 @app.route('/api/trending')
