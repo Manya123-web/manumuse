@@ -243,7 +243,8 @@ def stream_url(video_id):
 
 @app.route('/api/trending')
 def trending():
-    genre = request.args.get('genre', 'music hits 2025')
+    genre = request.args.get('genre', 'trending music 2025')
+
     ck = f'trending:{genre}'
     cached = cache_get(ck)
     if cached:
@@ -255,26 +256,24 @@ def trending():
             'no_warnings': True,
             'extract_flat': True,
             'skip_download': True,
-            'default_search': 'ytsearch20',
+            'default_search': 'ytsearch20',  
             'http_headers': HEADERS,
         }
-        with yt_dlp.YoutubeDL(SEARCH_OPTS) as ydl:
-            results = ydl.extract_info(genre, download=False)
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            results = ydl.extract_info(genre, download=False)  
 
         tracks = [
             t for t in (parse_track(e) for e in (results.get('entries') or [])) if t
         ]
-
-        if not tracks:
-            return jsonify({'tracks': [], 'genre': genre})
 
         data = {'tracks': tracks, 'genre': genre}
         cache_set(ck, data)
         return jsonify(data)
 
     except Exception as ex:
-        print("TRENDING ERROR:", ex)  
-        return jsonify({'tracks': [], 'error': str(ex)}), 200  
+        print("TRENDING ERROR:", str(ex))
+        return jsonify({'tracks': [], 'error': str(ex)}), 200
 
 
 @app.route('/api/suggestions')
