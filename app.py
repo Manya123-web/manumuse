@@ -25,7 +25,7 @@ def cache_get(key):
 def cache_set(key, val):
     cache[key] = (val, time.time())
 
-# Load cookies from file
+# Load cookies
 cookies = None
 cookies_loaded = False
 cookies_count = 0
@@ -38,7 +38,6 @@ try:
         with open(cookie_file, 'r') as f:
             data = json.load(f)
         
-        # Handle both array format and object format
         if isinstance(data, list):
             cookies_dict = {}
             for cookie in data:
@@ -49,36 +48,35 @@ try:
             cookies = cookies_dict
             cookies_count = len(cookies)
             cookies_loaded = True
-            print(f"✅ Loaded {cookies_count} cookies from array format")
+            print(f"✅ Loaded {cookies_count} cookies")
         elif isinstance(data, dict):
             cookies = data
             cookies_count = len(data)
             cookies_loaded = True
-            print(f"✅ Loaded {cookies_count} cookies from simple format")
-        else:
-            print(f"⚠️ Unknown cookie format")
+            print(f"✅ Loaded {cookies_count} cookies from dict")
     else:
-        print(f"⚠️ cookie.json not found at {cookie_file}")
-        
+        print(f"⚠️ cookie.json not found")
 except Exception as e:
     print(f"❌ Error loading cookies: {e}")
 
 # yt-dlp configuration
 BASE = {
-    'quiet': True,
-    'no_warnings': True,
+    'quiet': False,  # Set to False to see what's happening
+    'no_warnings': False,
     'nocheckcertificate': True,
     'force_ipv4': True,
     'socket_timeout': 30,
     'extractor_retries': 5,
     'retries': 10,
     'http_headers': {
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6261.119 Mobile Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept-Language': 'en-US,en;q=0.9',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     },
     'extractor_args': {
         'youtube': {
-            'player_client': ['android', 'web_music'],
+            'player_client': ['android', 'web', 'web_music'],
+            'skip': ['webpage'],
         }
     },
 }
@@ -86,9 +84,7 @@ BASE = {
 # Add cookies if available
 if cookies:
     BASE['cookies'] = cookies
-    print("✅ Cookies added to yt-dlp config")
-else:
-    print("⚠️ No cookies loaded - may encounter sign-in errors")
+    print("✅ Cookies added to yt-dlp")
 
 SEARCH_BASE = {**BASE, 'extract_flat': True, 'skip_download': True}
 
@@ -113,6 +109,7 @@ def health():
         'status': 'ok',
         'cookies_loaded': cookies_loaded,
         'cookies_count': cookies_count,
+        'ytdlp_version': yt_dlp.version.__version__,
         'timestamp': time.time()
     })
 
@@ -130,16 +127,21 @@ def search():
         return jsonify(hit)
 
     try:
+        print(f"Searching for: {q}")
         with yt_dlp.YoutubeDL(SEARCH_BASE) as ydl:
             results = ydl.extract_info(f'ytsearch{limit}:{q}', download=False)
-
+        
+        print(f"Got results: {results is not None}")
         entries = results.get('entries') or []
+        print(f"Entries count: {len(entries)}")
+        
         tracks = []
         for e in entries:
             track = make_track(e)
             if track:
                 tracks.append(track)
-                
+        
+        print(f"Tracks created: {len(tracks)}")
         data = {'tracks': tracks, 'query': q}
         cache_set(ck, data)
         return jsonify(data)
@@ -157,6 +159,7 @@ def trending():
         return jsonify(hit)
 
     try:
+        print(f"Trending for: {genre}")
         with yt_dlp.YoutubeDL(SEARCH_BASE) as ydl:
             results = ydl.extract_info(f'ytsearch20:{genre}', download=False)
 
@@ -191,6 +194,7 @@ def stream_url(video_id):
         'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio',
         'bestaudio/best',
         '140/251/250/249',
+        'best[acodec=opus]/best',
     ]
 
     for fmt in formats_to_try:
@@ -238,7 +242,7 @@ def stream_url(video_id):
                 return jsonify(data)
 
         except Exception as ex:
-            print(f"Format {fmt} error: {str(ex)[:100]}")
+            print(f"Format {fmt} error: {str(ex)[:200]}")
             continue
 
     return jsonify({'error': 'No playable stream found', 'skippable': True}), 500
