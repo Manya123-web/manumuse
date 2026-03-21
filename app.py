@@ -2,10 +2,10 @@ import os
 import time
 import re
 import traceback
+import json
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import yt_dlp
-import json
 
 app = Flask(__name__, static_folder='static')
 CORS(app)
@@ -25,15 +25,24 @@ def cache_get(key):
 def cache_set(key, val):
     cache[key] = (val, time.time())
 
-# Function to get cookies from environment variable
-def get_cookies():
-    cookies_str = os.environ.get('YOUTUBE_COOKIES')
-    if cookies_str:
-        try:
-            return json.loads(cookies_str)
-        except:
-            pass
-    return None
+# Load cookies from file
+def load_cookies():
+    try:
+        cookie_file = os.path.join(os.path.dirname(__file__), 'cookie.json')
+        if os.path.exists(cookie_file):
+            with open(cookie_file, 'r') as f:
+                cookies = json.load(f)
+                print(f"✅ Loaded {len(cookies)} cookies from cookie.json")
+                return cookies
+        else:
+            print("⚠️ cookie.json not found")
+            return None
+    except Exception as e:
+        print(f"❌ Error loading cookies: {e}")
+        return None
+
+# Load cookies
+cookies = load_cookies()
 
 # yt-dlp configuration with mobile support
 BASE = {
@@ -62,10 +71,11 @@ BASE = {
 }
 
 # Add cookies if available
-cookies = get_cookies()
 if cookies:
     BASE['cookies'] = cookies
-    print("✅ Cookies loaded for YouTube access")
+    print("✅ YouTube cookies added to requests")
+else:
+    print("⚠️ No cookies found - may encounter sign-in errors")
 
 SEARCH_BASE = {**BASE, 'extract_flat': True, 'skip_download': True}
 
@@ -97,7 +107,12 @@ def sw():
 
 @app.route('/health')
 def health():
-    return jsonify({'status': 'ok', 'timestamp': time.time()})
+    cookie_status = "loaded" if cookies else "not loaded"
+    return jsonify({
+        'status': 'ok', 
+        'timestamp': time.time(),
+        'cookies': cookie_status
+    })
 
 @app.route('/api/search')
 def search():
@@ -184,7 +199,6 @@ def stream_url(video_id):
                 'format': fmt,
                 'skip_download': True,
                 'noplaylist': True,
-                'quiet': False,  # Temporarily enable to see errors
             }
             
             with yt_dlp.YoutubeDL(opts) as ydl:
