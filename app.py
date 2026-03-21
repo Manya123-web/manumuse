@@ -64,7 +64,7 @@ def index():
     return send_from_directory('static', 'index.html')
 
 # Explicitly serve PWA files to fix 404 errors
-@app.route('/manifest.json')
+@app.route('static/manifest.json')
 def manifest():
     return send_from_directory('static', 'manifest.json')
 
@@ -239,13 +239,22 @@ def trending():
 
     try:
         with yt_dlp.YoutubeDL(SEARCH_OPTS) as ydl:
-            results = ydl.extract_info(f'ytsearch25:{genre}', download=False)
-        tracks = [t for t in (parse_track(e) for e in (results.get('entries') or [])) if t]
+            results = ydl.extract_info(f'ytsearch20:{genre} official audio song', download=False)
+
+        tracks = [
+            t for t in (parse_track(e) for e in (results.get('entries') or [])) if t
+        ]
+
+        if not tracks:
+            return jsonify({'tracks': [], 'genre': genre})
+
         data = {'tracks': tracks, 'genre': genre}
         cache_set(ck, data)
         return jsonify(data)
+
     except Exception as ex:
-        return jsonify({'error': str(ex), 'tracks': []}), 500
+        print("TRENDING ERROR:", ex)  
+        return jsonify({'tracks': [], 'error': str(ex)}), 200  
 
 
 @app.route('/api/suggestions')
