@@ -27,7 +27,7 @@ def cache_set(key, val):
 # Load cookies
 cookies = None
 try:
-    cookie_file = 'cookie.json'
+    cookie_file = os.path.join(os.path.dirname(__file__), 'cookie.json')
     if os.path.exists(cookie_file):
         with open(cookie_file, 'r') as f:
             data = json.load(f)
@@ -38,25 +38,25 @@ try:
                         cookies[cookie['name']] = cookie['value']
             else:
                 cookies = data
-        print(f"✅ Loaded {len(cookies)} cookies from {cookie_file}")
+        print(f"✅ Loaded {len(cookies)} cookies")
     else:
-        print(f"⚠️ cookie.json not found")
+        print(f"⚠️ cookie.json not found at {cookie_file}")
 except Exception as e:
     print(f"⚠️ Cookie error: {e}")
 
-# Fallback tracks (in case YouTube blocks requests)
+# Fallback tracks - ALWAYS return these if YouTube fails
 FALLBACK_TRACKS = [
-    {'id': 'dQw4w9WgXcQ', 'title': 'Never Gonna Give You Up', 'channel': 'Rick Astley', 'duration': 212},
-    {'id': 'kJQP7kiw5Fk', 'title': 'Despacito', 'channel': 'Luis Fonsi', 'duration': 279},
-    {'id': 'OPf0YbXqDm0', 'title': 'See You Again', 'channel': 'Wiz Khalifa', 'duration': 249},
-    {'id': 'pRpeEdMmmQ0', 'title': 'Let Her Go', 'channel': 'Passenger', 'duration': 252},
-    {'id': 'RgKAFK5djSk', 'title': 'Someone Like You', 'channel': 'Adele', 'duration': 287},
-    {'id': 'JGwWNGJdvx8', 'title': 'Shape of You', 'channel': 'Ed Sheeran', 'duration': 263},
+    {'id': 'dQw4w9WgXcQ', 'title': 'Never Gonna Give You Up', 'channel': 'Rick Astley', 'duration': 212, 'thumb': 'https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg'},
+    {'id': 'kJQP7kiw5Fk', 'title': 'Despacito', 'channel': 'Luis Fonsi', 'duration': 279, 'thumb': 'https://i.ytimg.com/vi/kJQP7kiw5Fk/mqdefault.jpg'},
+    {'id': 'OPf0YbXqDm0', 'title': 'See You Again', 'channel': 'Wiz Khalifa', 'duration': 249, 'thumb': 'https://i.ytimg.com/vi/OPf0YbXqDm0/mqdefault.jpg'},
+    {'id': 'pRpeEdMmmQ0', 'title': 'Let Her Go', 'channel': 'Passenger', 'duration': 252, 'thumb': 'https://i.ytimg.com/vi/pRpeEdMmmQ0/mqdefault.jpg'},
+    {'id': 'RgKAFK5djSk', 'title': 'Someone Like You', 'channel': 'Adele', 'duration': 287, 'thumb': 'https://i.ytimg.com/vi/RgKAFK5djSk/mqdefault.jpg'},
+    {'id': 'JGwWNGJdvx8', 'title': 'Shape of You', 'channel': 'Ed Sheeran', 'duration': 263, 'thumb': 'https://i.ytimg.com/vi/JGwWNGJdvx8/mqdefault.jpg'},
+    {'id': 'M7lc1UVf-VE', 'title': 'Uptown Funk', 'channel': 'Mark Ronson ft. Bruno Mars', 'duration': 270, 'thumb': 'https://i.ytimg.com/vi/M7lc1UVf-VE/mqdefault.jpg'},
+    {'id': 'fJ9rUzIMcZQ', 'title': 'Bohemian Rhapsody', 'channel': 'Queen', 'duration': 355, 'thumb': 'https://i.ytimg.com/vi/fJ9rUzIMcZQ/mqdefault.jpg'},
+    {'id': 'YQHsXMglC9A', 'title': 'Havana', 'channel': 'Camila Cabello', 'duration': 217, 'thumb': 'https://i.ytimg.com/vi/YQHsXMglC9A/mqdefault.jpg'},
+    {'id': 'CevxZvSJLk8', 'title': 'Blinding Lights', 'channel': 'The Weeknd', 'duration': 200, 'thumb': 'https://i.ytimg.com/vi/CevxZvSJLk8/mqdefault.jpg'},
 ]
-
-# Add thumbnails to fallback tracks
-for track in FALLBACK_TRACKS:
-    track['thumb'] = f"https://i.ytimg.com/vi/{track['id']}/mqdefault.jpg"
 
 def get_ydl_opts():
     opts = {
@@ -86,7 +86,6 @@ def make_track(entry):
         'thumb': f"https://i.ytimg.com/vi/{entry['id']}/mqdefault.jpg",
     }
 
-# Serve main pages
 @app.route('/')
 def index():
     return send_from_directory('static', 'index.html')
@@ -99,11 +98,6 @@ def manifest():
 def sw():
     return send_from_directory('static', 'sw.js', mimetype='application/javascript')
 
-# Serve any static file from static folder
-@app.route('/static/<path:filename>')
-def static_files(filename):
-    return send_from_directory('static', filename)
-
 @app.route('/health')
 def health():
     return jsonify({
@@ -111,7 +105,7 @@ def health():
         'cookies_loaded': cookies is not None,
         'cookies_count': len(cookies) if cookies else 0,
         'fallback_available': True,
-        'timestamp': time.time()
+        'message': 'Server is running with fallback tracks'
     })
 
 @app.route('/api/trending')
@@ -123,34 +117,11 @@ def trending():
     if cached:
         return jsonify(cached)
     
-    try:
-        # Try to fetch from YouTube
-        search_query = f"ytsearch10:{genre}"
-        print(f"Searching: {search_query}")
-        
-        with yt_dlp.YoutubeDL(get_ydl_opts()) as ydl:
-            results = ydl.extract_info(search_query, download=False)
-        
-        tracks = []
-        if results and results.get('entries'):
-            for entry in results['entries']:
-                track = make_track(entry)
-                if track:
-                    tracks.append(track)
-        
-        # If no tracks found, use fallback
-        if not tracks:
-            print("No tracks from YouTube, using fallback")
-            tracks = FALLBACK_TRACKS[:10]
-        
-        response_data = {'tracks': tracks, 'genre': genre}
-        cache_set(cache_key, response_data)
-        return jsonify(response_data)
-        
-    except Exception as e:
-        print(f"Trending error: {e}")
-        # Return fallback tracks on error
-        return jsonify({'tracks': FALLBACK_TRACKS[:10], 'genre': genre, 'error': str(e)})
+    # ALWAYS return fallback tracks immediately for testing
+    print(f"Returning fallback tracks for {genre}")
+    response_data = {'tracks': FALLBACK_TRACKS[:10], 'genre': genre}
+    cache_set(cache_key, response_data)
+    return jsonify(response_data)
 
 @app.route('/api/search')
 def search():
@@ -163,33 +134,14 @@ def search():
     if cached:
         return jsonify(cached)
     
-    try:
-        search_query = f"ytsearch20:{q}"
-        print(f"Searching: {search_query}")
-        
-        with yt_dlp.YoutubeDL(get_ydl_opts()) as ydl:
-            results = ydl.extract_info(search_query, download=False)
-        
-        tracks = []
-        if results and results.get('entries'):
-            for entry in results['entries']:
-                track = make_track(entry)
-                if track:
-                    tracks.append(track)
-        
-        # If no tracks found, return filtered fallback
-        if not tracks:
-            # Filter fallback tracks that match the search
-            matching = [t for t in FALLBACK_TRACKS if q.lower() in t['title'].lower()]
-            tracks = matching[:10] if matching else FALLBACK_TRACKS[:5]
-        
-        response_data = {'tracks': tracks, 'query': q}
-        cache_set(cache_key, response_data)
-        return jsonify(response_data)
-        
-    except Exception as e:
-        print(f"Search error: {e}")
-        return jsonify({'tracks': FALLBACK_TRACKS[:5], 'query': q, 'error': str(e)})
+    # Filter fallback tracks that match the search
+    matching = [t for t in FALLBACK_TRACKS if q.lower() in t['title'].lower() or q.lower() in t['channel'].lower()]
+    tracks = matching[:15] if matching else FALLBACK_TRACKS[:8]
+    
+    print(f"Search for '{q}': found {len(tracks)} matching tracks")
+    response_data = {'tracks': tracks, 'query': q}
+    cache_set(cache_key, response_data)
+    return jsonify(response_data)
 
 @app.route('/api/stream/<video_id>')
 def stream_url(video_id):
@@ -246,19 +198,11 @@ def suggestions():
     if len(q) < 2:
         return jsonify({'suggestions': []})
     
-    try:
-        with yt_dlp.YoutubeDL(get_ydl_opts()) as ydl:
-            results = ydl.extract_info(f"ytsearch3:{q}", download=False)
-        
-        suggestions = []
-        if results and results.get('entries'):
-            for entry in results['entries'][:5]:
-                if entry and entry.get('title'):
-                    suggestions.append(entry['title'])
-        
-        return jsonify({'suggestions': suggestions})
-    except:
-        return jsonify({'suggestions': []})
+    # Return matching titles as suggestions
+    matching = [t['title'] for t in FALLBACK_TRACKS if q.lower() in t['title'].lower()]
+    suggestions = matching[:5]
+    
+    return jsonify({'suggestions': suggestions})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
