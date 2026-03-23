@@ -1,7 +1,8 @@
 import os
 import time
 import re
-from flask import Flask, request, jsonify, send_from_directory
+import requests
+from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context
 from flask_cors import CORS
 import yt_dlp
 
@@ -48,6 +49,95 @@ def parse_track(e):
         'duration': e.get('duration') or 0,
         'thumb': f"https://i.ytimg.com/vi/{e['id']}/mqdefault.jpg",
     }
+
+def extract_stream(video_id):
+    """Extract direct audio stream URL using multiple client strategies."""
+    yt_url = f'https://www.youtube.com/watch?v={video_id}'
+
+    strategies = [
+        # Android client — bypasses most bot detection on server IPs
+        {
+            'format': 'bestaudio/best',
+            'quiet': True, 'no_warnings': True,
+            'nocheckcertificate': True, 'skip_download': True, 'noplaylist': True,
+            'extractor_args': {'youtube': {'player_client': ['android']}},
+            'http_headers': HEADERS,
+        },
+        # iOS client fallback
+        {
+            'format': 'bestaudio/best',
+            'quiet': True, 'no_warnings': True,
+            'nocheckcertificate': True, 'skip_download': True, 'noplaylist': True,
+            'extractor_args': {'youtube': {'player_client': ['ios']}},
+            'http_headers': HEADERS,
+        },
+        # TV client — another bypass option
+        {
+            'format': 'bestaudio/best',
+            'quiet': True, 'no_warnings': True,
+            'nocheckcertificate': True, 'skip_download': True, 'noplaylist': True,
+            'extractor_args': {'youtube': {'player_client': ['tv_embedded']}},
+            'http_headers': HEADERS,
+        },
+    ]
+
+    for opts in strategies:
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(yt_url, download=False)
+
+            if not info:
+                continue
+
+            formats = info.get('formats') or []
+
+            # Prefer pure audio (no video) — m4a preferred for best compatibility
+            chosen = None
+            for f in reversed(formats):
+                ext = f.get('ext', '')
+                if (f.get('acodec') not in ('none', None)
+                        and f.get('vcodec') in ('none', None)
+                        and f.get('url')
+                        and ext in ('m4a', 'webm', 'mp4', 'aac')):
+                    chosen = f
+                    break
+
+            # Any audio format
+            if not chosen:
+                for f in reversed(formats):
+                    if f.get('acodec', 'none') != 'none' and f.get('url'):
+                        chosen = f
+                        break
+
+            stream_url = (chosen['url'] if chosen else None) or info.get('url')
+            if not stream_url:
+                continue
+
+            ext = (chosen.get('ext') if chosen else None) or info.get('ext') or 'mp4'
+            mime_map = {'m4a': 'audio/mp4', 'webm': 'audio/webm', 'mp4': 'audio/mp4', 'aac': 'audio/aac', 'ogg': 'audio/ogg'}
+
+            return {
+                'stream_url': stream_url,
+                'mime': mime_map.get(ext, 'audio/mp4'),
+                'duration': info.get('duration') or 0,
+                'title': info.get('title') or 'Unknown',
+                'channel': info.get('uploader') or info.get('channel') or 'Unknown',
+                'ext': ext,
+            }, None
+
+        except yt_dlp.utils.ExtractorError as ex:
+            err = str(ex)
+            skip_words = ['sign in', 'login', 'private video', 'members only',
+                          'age-restricted', 'not available', 'been removed',
+                          'copyright', 'unavailable', 'blocked']
+            if any(w in err.lower() for w in skip_words):
+                return None, {'error': 'unavailable', 'reason': err[:120], 'skippable': True}
+            continue
+        except Exception as ex:
+            print(f'EXTRACT ERROR: {ex}')
+            continue
+
+    return None, {'error': 'Could not extract stream after all attempts', 'skippable': True}
 
 # ─── ROUTES ───────────────────────────────────────────────────────────────────
 
@@ -96,129 +186,114 @@ def search():
 
 
 @app.route('/api/stream/<video_id>')
-def stream_url(video_id):
+def stream_info(video_id):
+    """Returns stream metadata + a proxy URL the browser should use."""
     if not re.match(r'^[a-zA-Z0-9_\-]{6,15}$', video_id):
         return jsonify({'error': 'Invalid video ID'}), 400
 
-    ck = f'stream:{video_id}'
+    ck = f'streaminfo:{video_id}'
     cached = cache_get(ck)
     if cached:
-        return jsonify(cached)
+        # Return the proxy URL pointing back to our server
+        return jsonify({**cached, 'url': f'/api/proxy/{video_id}'})
 
-    yt_url = f'https://www.youtube.com/watch?v={video_id}'
-    last_error = 'Unknown error'
+    result, err = extract_stream(video_id)
+    if err:
+        return jsonify(err), 403 if err.get('error') == 'unavailable' else 500
 
-    # ── Key fix: use android client which bypasses bot detection on server IPs
-    # YouTube treats Android app requests differently — much less likely to block
-    stream_opts_list = [
-        # Option 1: Android client — most reliable on server IPs
-        {
-            'format': 'bestaudio/best',
-            'quiet': True,
-            'no_warnings': True,
-            'nocheckcertificate': True,
-            'skip_download': True,
-            'noplaylist': True,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android'],
-                }
-            },
-            'http_headers': HEADERS,
-        },
-        # Option 2: iOS client fallback
-        {
-            'format': 'bestaudio/best',
-            'quiet': True,
-            'no_warnings': True,
-            'nocheckcertificate': True,
-            'skip_download': True,
-            'noplaylist': True,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['ios'],
-                }
-            },
-            'http_headers': HEADERS,
-        },
-        # Option 3: web client last resort
-        {
-            'format': 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio',
-            'quiet': True,
-            'no_warnings': True,
-            'nocheckcertificate': True,
-            'skip_download': True,
-            'noplaylist': True,
-            'http_headers': HEADERS,
-        },
-    ]
+    # Cache the raw stream data (including the direct URL for proxying)
+    cache_set(ck, result)
 
-    for opts in stream_opts_list:
-        try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(yt_url, download=False)
+    return jsonify({
+        'url': f'/api/proxy/{video_id}',   # ← browser uses our proxy, not direct YT URL
+        'mime': result['mime'],
+        'duration': result['duration'],
+        'title': result['title'],
+        'channel': result['channel'],
+        'thumb': f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg",
+        'video_id': video_id,
+    })
 
-            if not info:
-                last_error = 'No info returned'
-                continue
 
-            formats = info.get('formats') or []
-            chosen = None
+@app.route('/api/proxy/<video_id>')
+def proxy_audio(video_id):
+    """
+    Proxies the YouTube audio stream through our server.
+    This solves ERR_CONNECTION_TIMED_OUT — the browser talks to us,
+    we fetch from YouTube server-side and pipe it back.
+    Supports Range requests so seeking works.
+    """
+    if not re.match(r'^[a-zA-Z0-9_\-]{6,15}$', video_id):
+        return 'Invalid ID', 400
 
-            # Prefer pure audio (no video track) — smallest, fastest
-            for f in reversed(formats):
-                if (f.get('acodec') not in ('none', None)
-                        and f.get('vcodec') in ('none', None)
-                        and f.get('url')):
-                    chosen = f
-                    break
+    # Get cached stream info
+    ck = f'streaminfo:{video_id}'
+    stream_data = cache_get(ck)
 
-            # Fallback: any format with audio
-            if not chosen:
-                for f in reversed(formats):
-                    if f.get('acodec', 'none') != 'none' and f.get('url'):
-                        chosen = f
-                        break
+    if not stream_data:
+        # Not cached — extract fresh
+        result, err = extract_stream(video_id)
+        if err or not result:
+            return 'Stream unavailable', 503
+        cache_set(ck, result)
+        stream_data = result
 
-            stream = (chosen['url'] if chosen else None) or info.get('url')
-            if not stream:
-                last_error = 'No playable URL in formats'
-                continue
+    stream_url = stream_data['stream_url']
+    mime = stream_data.get('mime', 'audio/mp4')
 
-            ext = (chosen.get('ext') if chosen else None) or info.get('ext') or 'mp4'
-            mime_map = {'m4a': 'audio/mp4', 'webm': 'audio/webm', 'mp4': 'audio/mp4', 'ogg': 'audio/ogg'}
+    # Forward range header if browser sent one (for seeking)
+    range_header = request.headers.get('Range')
+    req_headers = {
+        **HEADERS,
+        'Referer': 'https://www.youtube.com/',
+        'Origin': 'https://www.youtube.com',
+    }
+    if range_header:
+        req_headers['Range'] = range_header
 
-            data = {
-                'url': stream,
-                'mime': mime_map.get(ext, 'audio/mp4'),
-                'duration': info.get('duration') or 0,
-                'title': info.get('title') or 'Unknown',
-                'channel': info.get('uploader') or info.get('channel') or 'Unknown',
-                'thumb': f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg",
-                'video_id': video_id,
-            }
-            cache_set(ck, data)
-            return jsonify(data)
+    try:
+        yt_resp = requests.get(
+            stream_url,
+            headers=req_headers,
+            stream=True,
+            timeout=30,
+        )
 
-        except yt_dlp.utils.ExtractorError as ex:
-            last_error = str(ex)
-            skip_words = ['sign in', 'login', 'private video', 'members only',
-                          'age-restricted', 'not available', 'been removed',
-                          'copyright', 'unavailable', 'blocked']
-            if any(w in last_error.lower() for w in skip_words):
-                return jsonify({
-                    'error': 'unavailable',
-                    'reason': last_error[:120],
-                    'skippable': True
-                }), 403
-            continue
+        status = yt_resp.status_code  # usually 200 or 206
 
-        except Exception as ex:
-            last_error = str(ex)
-            print(f'STREAM ERROR [{video_id}]: {ex}')
-            continue
+        def generate():
+            for chunk in yt_resp.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
 
-    return jsonify({'error': last_error[:200], 'skippable': True}), 500
+        resp_headers = {
+            'Content-Type': mime,
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': 'no-cache',
+        }
+
+        # Forward content-range and content-length if present
+        for h in ('Content-Length', 'Content-Range'):
+            if h in yt_resp.headers:
+                resp_headers[h] = yt_resp.headers[h]
+
+        return Response(
+            stream_with_context(generate()),
+            status=status,
+            headers=resp_headers,
+            mimetype=mime,
+        )
+
+    except Exception as ex:
+        print(f'PROXY ERROR [{video_id}]: {ex}')
+        # Cache expired — try fresh extraction
+        cache.pop(ck, None)
+        result, err = extract_stream(video_id)
+        if err or not result:
+            return 'Proxy failed', 503
+        cache_set(ck, result)
+        # Redirect to retry
+        return proxy_audio(video_id)
 
 
 @app.route('/api/trending')
