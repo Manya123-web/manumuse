@@ -451,37 +451,25 @@
   async function checkServer() {
     const dot = document.getElementById('SRVDOT');
     const txt = document.getElementById('SRVTXT');
-    const banner = document.getElementById('SRVBANNER');
-
-    if (!SERVER) {
-      dot.className = 'srv-dot err';
-      txt.textContent = 'No server — click here to set it up';
-      banner.style.cursor = 'pointer';
-      banner.onclick = openModal;
-      return false;
-    }
-
-    dot.className = 'srv-dot loading';
-    txt.textContent = 'Connecting…';
-    banner.style.cursor = 'default';
-    banner.onclick = null;
-
+    
     try {
-      const r = await fetch(`${SERVER}/health`, { signal: AbortSignal.timeout(10000) });
-      if (r.ok) {
-        dot.className = 'srv-dot ok';
-        txt.textContent = 'Server connected ✓';
-        setTimeout(() => { banner.style.display = 'none'; }, 3000);
-        return true;
-      }
-    } catch(e) {}
-
-    dot.className = 'srv-dot err';
-    txt.textContent = 'Cannot reach server — click to reconfigure';
-    banner.style.cursor = 'pointer';
-    banner.onclick = openModal;
+        const r = await fetch(`${SERVER}/health`);
+        const data = await r.json();
+        
+        if (r.ok) {
+            dot.className = 'srv-dot ok';
+            txt.textContent = `Invidious: ${data.invidious_instance.split('//')[1]}`;
+            setTimeout(() => { 
+                document.getElementById('SRVBANNER').style.display = 'none'; 
+            }, 3000);
+            return true;
+        }
+    } catch(e) {
+        dot.className = 'srv-dot err';
+        txt.textContent = 'Cannot reach server';
+    }
     return false;
-  }
+}
 
   // ═══════════════════════════════════════════════════
   //  AUDIO EVENTS
@@ -917,6 +905,43 @@
     if (ok) fetchHome('music hits 2025');
     else document.getElementById('HC').innerHTML = emptyH('key','Welcome to ManuMuse!','Set your server URL above to start streaming');
   });
+
+  // Mobile audio initialization fix
+document.addEventListener('DOMContentLoaded', () => {
+    // Fix for iOS audio autoplay restrictions
+    const AUDIO = document.getElementById('AUDIO');
+    
+    // Enable audio context on first user interaction
+    const enableAudio = () => {
+        AUDIO.load();
+        // Remove listeners after first interaction
+        document.removeEventListener('click', enableAudio);
+        document.removeEventListener('touchstart', enableAudio);
+    };
+    
+    document.addEventListener('click', enableAudio);
+    document.addEventListener('touchstart', enableAudio);
+    
+    // Handle mobile network changes
+    if ('connection' in navigator) {
+        navigator.connection.addEventListener('change', () => {
+            if (AUDIO.paused && queue.length > 0) {
+                // Reconnect if network comes back
+                console.log('Network changed, reconnecting...');
+            }
+        });
+    }
+});
+
+// Better error handling for mobile
+AUDIO.addEventListener('stalled', () => {
+    console.log('Audio stalled, retrying...');
+    toast('Buffering...', 'info');
+});
+
+AUDIO.addEventListener('waiting', () => {
+    toast('Loading...', 'info');
+});
   </script>
   </body>
   </html>

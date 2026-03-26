@@ -1,5 +1,5 @@
 const CACHE = 'manumuse-v1';
-const ASSETS = ['/', '/index.html'];
+const ASSETS = ['/', '/index.html', '/manifest.json'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
@@ -14,10 +14,16 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  // Don't intercept API/stream calls — let them go to network
-  if (e.request.url.includes('/api/') || e.request.url.includes('ytimg') || e.request.url.includes('googlevideo')) {
+  const url = e.request.url;
+  
+  // Don't intercept API, stream, or external requests
+  if (url.includes('/api/') || 
+      url.includes('ytimg') || 
+      url.includes('googlevideo') ||
+      url.includes('proxy')) {
     return;
   }
+  
   e.respondWith(
     caches.match(e.request).then(cached => cached || fetch(e.request))
   );
