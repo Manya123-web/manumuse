@@ -2,6 +2,7 @@ import os
 import time
 import re
 import requests
+import json
 from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context
 from flask_cors import CORS
 import random
@@ -10,21 +11,6 @@ app = Flask(__name__, static_folder='static')
 CORS(app)
 
 # ─── Configuration ────────────────────────────────────────────────────────────
-# List of public Invidious instances (regularly updated list)
-INVIDIOUS_INSTANCES = [
-    'https://invidious.io.lol',
-    'https://yewtu.be',
-    'https://invidious.privacydev.net',
-    'https://inv.riverside.rocks',
-    'https://invidious.flokinet.to',
-    'https://invidious.snopyta.org',
-    'https://inv.vern.cc',
-    'https://invidious.kavin.rocks',
-    'https://vid.puffyan.us',
-    'https://inv.us.projectsegfault.com',
-]
-
-# Cache for performance
 cache = {}
 CACHE_TTL = 300
 
@@ -39,191 +25,182 @@ def cache_get(key):
 def cache_set(key, val):
     cache[key] = (val, time.time())
 
-def get_working_invidious_instance():
-    """Find a working Invidious instance"""
-    # Check cache first
-    cached_instance = cache_get('working_instance')
-    if cached_instance:
-        return cached_instance
+# ─── STRATEGY 1: Piped API (Better than Invidious) ──────────────────────────
+PIPED_INSTANCES = [
+    'https://pipedapi.kavin.rocks',
+    'https://pipedapi.moomoo.me',
+    'https://pipedapi.adminforge.de',
+    'https://pipedapi.lunar.icu',
+]
+
+def get_working_piped_instance():
+    """Find working Piped instance"""
+    cached = cache_get('piped_instance')
+    if cached:
+        return cached
     
-    # Test instances
-    for instance in INVIDIOUS_INSTANCES:
+    for instance in PIPED_INSTANCES:
         try:
-            response = requests.get(f"{instance}/api/v1/stats", timeout=5)
+            response = requests.get(f"{instance}/healthcheck", timeout=5)
             if response.status_code == 200:
-                cache_set('working_instance', instance)
-                print(f"✅ Using Invidious instance: {instance}")
+                cache_set('piped_instance', instance)
+                print(f"✅ Using Piped instance: {instance}")
                 return instance
         except:
             continue
     
-    # Fallback to a known reliable one
-    return 'https://yewtu.be'
+    return PIPED_INSTANCES[0]
 
-def parse_duration(duration_seconds):
-    """Convert seconds to readable duration"""
-    if not duration_seconds:
-        return 0
-    return int(duration_seconds)
-
-def parse_track_from_invidious(video_data):
-    """Parse track data from Invidious API response"""
-    try:
-        # Get best thumbnail
-        thumbnails = video_data.get('videoThumbnails', [])
-        thumb = thumbnails[-1]['url'] if thumbnails else f"https://i.ytimg.com/vi/{video_data.get('videoId', '')}/mqdefault.jpg"
-        
-        return {
-            'id': video_data.get('videoId', ''),
-            'title': video_data.get('title', 'Unknown'),
-            'channel': video_data.get('author', video_data.get('authorId', 'Unknown')),
-            'duration': parse_duration(video_data.get('lengthSeconds', 0)),
-            'thumb': thumb,
-        }
-    except Exception as e:
-        print(f"Error parsing track: {e}")
-        return None
-
-def search_invidious(query, limit=20):
-    """Search for tracks using Invidious API"""
-    instance = get_working_invidious_instance()
+def search_piped(query, limit=20):
+    """Search using Piped API"""
+    instance = get_working_piped_instance()
     
     try:
-        # Invidious search API
-        search_url = f"{instance}/api/v1/search"
+        # Piped search endpoint
+        search_url = f"{instance}/search"
         params = {
             'q': query,
-            'type': 'video',
-            'sort_by': 'relevance',
+            'filter': 'videos',
             'page': 1
         }
         
-        response = requests.get(search_url, params=params, timeout=15)
+        response = requests.get(search_url, params=params, timeout=10)
         
         if response.status_code != 200:
-            print(f"Invidious search failed: {response.status_code}")
             return []
         
         data = response.json()
-        
-        # Filter and parse results
         tracks = []
-        for item in data[:limit]:
-            # Only include videos (not channels or playlists)
-            if item.get('type') == 'video' and item.get('videoId'):
-                track = parse_track_from_invidious(item)
-                if track:
-                    tracks.append(track)
+        
+        for item in data.get('items', [])[:limit]:
+            if item.get('type') == 'video':
+                video_id = item.get('url', '').split('watch?v=')[-1]
+                if video_id:
+                    tracks.append({
+                        'id': video_id,
+                        'title': item.get('title', 'Unknown'),
+                        'channel': item.get('uploaderName', 'Unknown'),
+                        'duration': item.get('duration', 0),
+                        'thumb': item.get('thumbnail', f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"),
+                    })
         
         return tracks
         
     except Exception as e:
-        print(f"Search error: {e}")
+        print(f"Piped search error: {e}")
         return []
 
-def get_audio_stream_from_invidious(video_id):
-    """Get audio stream URL from Invidious"""
-    instance = get_working_invidious_instance()
+def get_stream_piped(video_id):
+    """Get audio stream from Piped API"""
+    instance = get_working_piped_instance()
     
     try:
-        # Get video info from Invidious
-        video_url = f"{instance}/api/v1/videos/{video_id}"
-        response = requests.get(video_url, timeout=15)
+        # Get stream info from Piped
+        stream_url = f"{instance}/streams/{video_id}"
+        response = requests.get(stream_url, timeout=10)
         
         if response.status_code != 200:
-            print(f"Failed to get video info: {response.status_code}")
-            return None, f"Video info fetch failed: {response.status_code}"
+            return None, f"Stream fetch failed: {response.status_code}"
         
         data = response.json()
         
         # Get audio streams
-        format_streams = data.get('formatStreams', [])
-        adaptive_formats = data.get('adaptiveFormats', [])
+        audio_streams = data.get('audioStreams', [])
         
-        # Prefer audio-only streams
-        audio_stream = None
+        if not audio_streams:
+            return None, "No audio streams found"
         
-        # Check adaptiveFormats first (usually better quality)
-        for fmt in adaptive_formats:
-            if fmt.get('type', '').startswith('audio/'):
-                audio_stream = fmt
-                break
-        
-        # If no audio-only, check formatStreams
-        if not audio_stream:
-            for fmt in format_streams:
-                if fmt.get('type', '').startswith('audio/'):
-                    audio_stream = fmt
-                    break
-        
-        if not audio_stream:
-            return None, "No audio stream found"
-        
-        # Get the stream URL
-        stream_url = audio_stream.get('url')
-        if not stream_url:
-            return None, "No stream URL found"
-        
-        # Add CORS headers to URL (some instances need this)
-        if not stream_url.startswith('http'):
-            stream_url = f"{instance}{stream_url}"
-        
-        # Determine MIME type
-        mime_type = audio_stream.get('type', 'audio/mp4').split(';')[0]
+        # Get best quality audio
+        best_audio = audio_streams[-1]  # Usually last is highest quality
         
         return {
-            'stream_url': stream_url,
-            'mime': mime_type,
-            'duration': data.get('lengthSeconds', 0),
+            'stream_url': best_audio.get('url'),
+            'mime': best_audio.get('mimeType', 'audio/mp4'),
+            'duration': data.get('duration', 0),
             'title': data.get('title', 'Unknown'),
-            'channel': data.get('author', 'Unknown'),
+            'channel': data.get('uploader', 'Unknown'),
         }, None
         
-    except requests.exceptions.Timeout:
-        return None, "Request timeout"
     except Exception as e:
-        print(f"Stream extraction error: {e}")
+        print(f"Piped stream error: {e}")
         return None, str(e)
 
-# Fallback to yt-dlp if Invidious fails
-def extract_stream_fallback(video_id):
-    """Fallback to yt-dlp if Invidious fails"""
+# ─── STRATEGY 2: yt-dlp with Cookies (if available) ──────────────────────────
+def extract_stream_ytdlp(video_id):
+    """Fallback to yt-dlp"""
     try:
         import yt_dlp
         
         yt_url = f'https://www.youtube.com/watch?v={video_id}'
         
-        opts = {
-            'format': 'bestaudio[ext=m4a]/bestaudio/best',
-            'quiet': True,
-            'no_warnings': True,
-            'nocheckcertificate': True,
-            'skip_download': True,
-            'noplaylist': True,
-            'extractor_args': {'youtube': {'player_client': ['android']}},
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36',
+        # Try multiple client strategies
+        strategies = [
+            {
+                'format': 'bestaudio[ext=m4a]/bestaudio/best',
+                'quiet': True,
+                'no_warnings': True,
+                'nocheckcertificate': True,
+                'skip_download': True,
+                'noplaylist': True,
+                'extractor_args': {'youtube': {'player_client': ['android']}},
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36',
+                },
             },
-        }
+            {
+                'format': 'bestaudio/best',
+                'quiet': True,
+                'no_warnings': True,
+                'nocheckcertificate': True,
+                'skip_download': True,
+                'extractor_args': {'youtube': {'player_client': ['ios']}},
+            }
+        ]
         
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(yt_url, download=False)
-            
-        if info and info.get('url'):
-            return {
-                'stream_url': info.get('url'),
-                'mime': 'audio/mp4',
-                'duration': info.get('duration', 0),
-                'title': info.get('title', 'Unknown'),
-                'channel': info.get('uploader', 'Unknown'),
-            }, None
-            
+        for opts in strategies:
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(yt_url, download=False)
+                    
+                if info and info.get('url'):
+                    return {
+                        'stream_url': info.get('url'),
+                        'mime': 'audio/mp4',
+                        'duration': info.get('duration', 0),
+                        'title': info.get('title', 'Unknown'),
+                        'channel': info.get('uploader', 'Unknown'),
+                    }, None
+            except:
+                continue
+                
     except Exception as e:
-        print(f"Fallback extraction failed: {e}")
+        print(f"yt-dlp error: {e}")
     
     return None, "All extraction methods failed"
 
-# ─── Routes (Updated to use Invidious) ───────────────────────────────────────
+# ─── MAIN EXTRACTION FUNCTION ────────────────────────────────────────────────
+def extract_stream(video_id):
+    """Try multiple strategies in order"""
+    
+    # Strategy 1: Piped API (Most reliable for cloud)
+    print(f"🎵 Trying Piped for {video_id}")
+    result, error = get_stream_piped(video_id)
+    if result:
+        print(f"✅ Piped success for {video_id}")
+        return result, None
+    print(f"❌ Piped failed: {error}")
+    
+    # Strategy 2: yt-dlp (if Piped fails)
+    print(f"🎵 Trying yt-dlp for {video_id}")
+    result, error = extract_stream_ytdlp(video_id)
+    if result:
+        print(f"✅ yt-dlp success for {video_id}")
+        return result, None
+    print(f"❌ yt-dlp failed: {error}")
+    
+    return None, "All strategies failed"
+
+# ─── ROUTES ───────────────────────────────────────────────────────────────────
 
 @app.route('/')
 def index():
@@ -242,12 +219,13 @@ def sw():
 
 @app.route('/health')
 def health():
-    instance = get_working_invidious_instance()
+    piped = get_working_piped_instance()
     return jsonify({
         'status': 'ok',
-        'version': '6.0',
-        'server': 'flask-invidious',
-        'invidious_instance': instance
+        'version': '6.1',
+        'server': 'flask-piped',
+        'piped_instance': piped,
+        'timestamp': time.time()
     })
 
 @app.route('/api/search')
@@ -263,33 +241,11 @@ def search():
     if cached:
         return jsonify(cached)
     
-    # Search using Invidious
-    tracks = search_invidious(q, limit)
+    # Use Piped for search
+    tracks = search_piped(q, limit)
     
     if not tracks:
-        # If Invidious fails, try yt-dlp as fallback
-        try:
-            import yt_dlp
-            flat_opts = {
-                'quiet': True,
-                'no_warnings': True,
-                'extract_flat': True,
-                'skip_download': True,
-            }
-            with yt_dlp.YoutubeDL(flat_opts) as ydl:
-                results = ydl.extract_info(f'ytsearch{limit}:{q}', download=False)
-            
-            for entry in results.get('entries', []):
-                if entry and entry.get('id'):
-                    tracks.append({
-                        'id': entry['id'],
-                        'title': entry.get('title', 'Unknown'),
-                        'channel': entry.get('uploader', 'Unknown'),
-                        'duration': entry.get('duration', 0),
-                        'thumb': f"https://i.ytimg.com/vi/{entry['id']}/mqdefault.jpg",
-                    })
-        except Exception as e:
-            print(f"Fallback search failed: {e}")
+        tracks = []
     
     data = {'tracks': tracks, 'query': q}
     cache_set(cache_key, data)
@@ -297,7 +253,7 @@ def search():
 
 @app.route('/api/stream/<video_id>')
 def stream_info(video_id):
-    """Get stream info using Invidious"""
+    """Get stream info"""
     if not re.match(r'^[a-zA-Z0-9_\-]{6,15}$', video_id):
         return jsonify({'error': 'Invalid video ID'}), 400
     
@@ -306,16 +262,11 @@ def stream_info(video_id):
     if cached:
         return jsonify({**cached, 'url': f'/api/proxy/{video_id}'})
     
-    # Try Invidious first
-    result, error = get_audio_stream_from_invidious(video_id)
-    
-    # If Invidious fails, try yt-dlp fallback
-    if not result:
-        print(f"Invidious failed for {video_id}, trying yt-dlp fallback")
-        result, error = extract_stream_fallback(video_id)
+    # Extract stream using multiple strategies
+    result, error = extract_stream(video_id)
     
     if not result:
-        return jsonify({'error': error or 'Could not extract stream'}), 500
+        return jsonify({'error': error or 'Could not extract stream'}), 404
     
     cache_set(cache_key, result)
     
@@ -325,7 +276,7 @@ def stream_info(video_id):
         'duration': result['duration'],
         'title': result['title'],
         'channel': result['channel'],
-        'thumb': f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg",
+        'thumb': f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
         'video_id': video_id,
     })
 
@@ -339,29 +290,40 @@ def proxy_audio(video_id):
     stream_data = cache_get(cache_key)
     
     if not stream_data:
-        # Try to get stream data again
-        result, error = get_audio_stream_from_invidious(video_id)
+        result, error = extract_stream(video_id)
         if not result:
-            result, error = extract_stream_fallback(video_id)
-        if not result:
-            return 'Stream unavailable', 503
+            return f'Stream unavailable: {error}', 503
         cache_set(cache_key, result)
         stream_data = result
     
     stream_url = stream_data['stream_url']
     mime = stream_data.get('mime', 'audio/mp4')
     
+    if not stream_url:
+        return 'No stream URL', 404
+    
     # Forward range header for seeking
     range_header = request.headers.get('Range')
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Referer': 'https://www.youtube.com/',
+        'Accept': '*/*',
     }
     if range_header:
         headers['Range'] = range_header
     
     try:
         yt_resp = requests.get(stream_url, headers=headers, stream=True, timeout=30)
+        
+        if yt_resp.status_code not in [200, 206]:
+            print(f"Proxy error: status {yt_resp.status_code} for {video_id}")
+            # Clear cache and retry once
+            cache_set(cache_key, None)
+            result, error = extract_stream(video_id)
+            if result:
+                cache_set(cache_key, result)
+                return proxy_audio(video_id)
+            return f'Stream error: {yt_resp.status_code}', 503
         
         def generate():
             for chunk in yt_resp.iter_content(chunk_size=16384):
@@ -387,7 +349,7 @@ def proxy_audio(video_id):
         )
         
     except Exception as ex:
-        print(f'Proxy error: {ex}')
+        print(f'Proxy error for {video_id}: {ex}')
         return 'Proxy failed', 503
 
 @app.route('/api/trending')
@@ -398,7 +360,7 @@ def trending():
     if cached:
         return jsonify(cached)
     
-    tracks = search_invidious(genre, 25)
+    tracks = search_piped(genre, 25)
     data = {'tracks': tracks, 'genre': genre}
     cache_set(cache_key, data)
     return jsonify(data)
@@ -414,21 +376,12 @@ def suggestions():
     if cached:
         return jsonify(cached)
     
-    # Get search results for suggestions
-    tracks = search_invidious(q, 5)
+    tracks = search_piped(q, 5)
     suggestions = [track['title'] for track in tracks[:5]]
     
     data = {'suggestions': suggestions}
     cache_set(cache_key, data)
     return jsonify(data)
-
-@app.route('/api/instances')
-def list_instances():
-    """List available Invidious instances for debugging"""
-    return jsonify({
-        'instances': INVIDIOUS_INSTANCES,
-        'current': get_working_invidious_instance()
-    })
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
